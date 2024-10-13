@@ -21,11 +21,7 @@ A C++ tool to inspect and extract contents from PyInstaller archives.
     cd PyInstallerArchiveViewer
     ```
 2. Build:
-    ```sh
-    mkdir build
-    cd build
-    cmake ..
-    cmake --build .
+   Build with Visual studio 
     ```
 
 ### Run
