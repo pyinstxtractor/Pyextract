@@ -6,7 +6,7 @@
 #include <vector>
 #include <string>
 #include <cstring>
-#include <cstdint> // Ensure you include this for fixed-width integer types
+#include <cstdint> 
 
 // Structure for Table of Contents Entry
 struct CTOCEntry {
@@ -23,11 +23,11 @@ struct CTOCEntry {
 
     // Getters for entry details
     uint32_t getCompressedDataSize() const {
-        return cmprsdDataSize; // Fixed the variable name here
+        return cmprsdDataSize; 
     }
 
     const std::string& getName() const {
-        return name; // Fixed the variable name here
+        return name; 
     }
 };
 
