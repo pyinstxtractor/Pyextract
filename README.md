@@ -26,8 +26,8 @@ A C++ tool to inspect and extract contents from PyInstaller archives.
     ```
 
 ### Run
-    sh
+	```sh
     PyInstaller-C++.exe path/to/your/executable
-    
+    ```
 
 
