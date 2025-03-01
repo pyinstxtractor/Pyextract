@@ -7,6 +7,8 @@
 #include <winsock2.h>
 #include <random>
 #include <sstream>
+#include <filesystem>
+#include "zlib.h"
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "oleaut32.lib")
@@ -295,10 +297,182 @@ void PyInstArchive::parseTOC() {
  * This method iterates over the Table of Contents (TOC) and prints the names
  * and uncompressed sizes of the embedded files.
  */
-void PyInstArchive::viewFiles() {
-    std::cout << "[+] Viewing files in the archive..." << std::endl;
+void PyInstArchive::displayInfo() {
+    std::cout << "[+] Archive Info:" << std::endl;
+    // Print out relevant information about the PyInstaller archive
+    // For example: number of files, archive version, etc.
     for (const auto& entry : tocList) {
-        std::cout << entry.name << " (" << entry.uncmprsdDataSize << " bytes)" << std::endl;
+        std::cout << "File: " << entry.getName() << ", Size: " << entry.getCompressedDataSize() << " bytes" << std::endl;
     }
-    std::cout << "[+] Finished viewing files." << std::endl;
+}
+
+/**
+ * @brief Extracts files from a PyInstaller archive to a specified directory.
+ *
+ * This method iterates through the Table of Contents (TOC) of the archive and extracts each file.
+ * For compressed entries, it decompresses the data using zlib and writes it to the output directory.
+ * Uncompressed data is written as-is.
+ *
+ * @param outputDir The directory where extracted files will be saved.
+ *
+ * @note The output directory and its subdirectories will be created if they do not exist.
+ * @note Errors are logged if any file extraction or decompression fails.
+ */
+void PyInstArchive::extractFiles(const std::string& outputDir) {
+    for (const auto& tocEntry : tocList) {
+        // Move the file pointer to the position of the compressed data
+        fPtr.seekg(tocEntry.position, std::ios::beg);
+
+        // Read the compressed data into a vector
+        std::vector<char> compressedData(tocEntry.getCompressedDataSize());
+        fPtr.read(compressedData.data(), tocEntry.getCompressedDataSize());
+
+        std::vector<char> decompressedData;
+
+        if (tocEntry.isCompressed()) {
+            // If the entry is compressed, decompress the data using zlib
+            decompressedData.resize(tocEntry.uncmprsdDataSize);
+
+            z_stream strm = {};
+            strm.avail_in = tocEntry.getCompressedDataSize();
+            strm.next_in = reinterpret_cast<Bytef*>(compressedData.data());
+            strm.avail_out = tocEntry.uncmprsdDataSize;
+            strm.next_out = reinterpret_cast<Bytef*>(decompressedData.data());
+
+            if (inflateInit(&strm) != Z_OK) {
+                std::cerr << "[!] Error: Could not initialize zlib for decompression" << std::endl;
+                continue;
+            }
+
+            int result = inflate(&strm, Z_FINISH);
+            inflateEnd(&strm);
+
+            if (result != Z_STREAM_END) {
+                std::cerr << "[!] Error: Decompression failed for " << tocEntry.getName() << std::endl;
+                continue;
+            }
+        }
+        else {
+            // If the data is not compressed, just use the original data
+            decompressedData = compressedData;
+        }
+
+        // Construct the full output file path
+        std::filesystem::path outputFilePath = std::filesystem::path(outputDir) / tocEntry.getName();
+
+        // Ensure the directory exists
+        std::filesystem::create_directories(outputFilePath.parent_path());
+
+        // Write the decompressed data to the output file
+        std::ofstream outFile(outputFilePath, std::ios::binary);
+        if (!outFile.is_open()) {
+            std::cerr << "[!] Error: Could not open output file " << outputFilePath << std::endl;
+            continue;
+        }
+
+        outFile.write(decompressedData.data(), decompressedData.size());
+        outFile.close();
+
+        std::cout << "[+] Extracted: " << tocEntry.getName() << " (" << decompressedData.size() << " bytes)" << std::endl;
+    }
+}
+
+/**
+ * @brief Decompresses data using zlib.
+ *
+ * Decompresses `compressedData` into `decompressedData` using zlib.
+ * Ensure `decompressedData` has enough space for the decompressed output.
+ *
+ * @param compressedData Input vector of compressed data.
+ * @param decompressedData Output vector for decompressed data.
+ *
+ * @note Prints an error message if decompression fails.
+ */
+void PyInstArchive::decompressData(const std::vector<char>& compressedData, std::vector<char>& decompressedData) {
+    uLongf decompressedSize = decompressedData.size();
+    int result = uncompress(reinterpret_cast<Bytef*>(decompressedData.data()), &decompressedSize,
+        reinterpret_cast<const Bytef*>(compressedData.data()), compressedData.size());
+
+    if (result != Z_OK) {
+        std::cerr << "[!] Error: Decompression failed" << std::endl;
+        // Optionally, you could also throw an exception or handle the error more specifically
+    }
+}
+
+/**
+ * @brief Parses command-line arguments for interacting with a PyInstaller archive.
+ *
+ * This method processes the command-line arguments, checks if the required parameters
+ * are provided, and then opens the specified PyInstaller archive. It can either display
+ * information about the archive or extract its files to the specified output directory.
+ *
+ * @param argc The number of command-line arguments.
+ * @param argv The array of command-line arguments.
+ *
+ * @note The command must be either "-i" to display archive information or "-u" to extract files.
+ *       The archive path is required, and an optional output directory can be specified.
+ * @note If the output directory does not exist, it will be created automatically.
+ * @note Errors are logged if any arguments are invalid or if the archive cannot be processed.
+ */
+void parseArgs(int argc, char* argv[]) {
+    if (argc < 3) {
+        std::cerr << "[!] Usage: " << argv[0] << " [-i | -u] <archive_path> [output_dir]" << std::endl;
+        exit(1);
+    }
+
+    std::string command = argv[1];    // Command (-i or -u)
+    std::string archivePath = argv[2]; // Archive file path
+    std::string outputDir = (argc > 3) ? argv[3] : "unpacked"; // Output directory (default to "output")
+
+    // Check if the output directory exists, create it if it doesn't
+    if (!std::filesystem::exists(outputDir)) {
+        std::filesystem::create_directories(outputDir);
+    }
+
+    PyInstArchive archive(archivePath);
+
+    if (!archive.open()) {
+        std::cerr << "[!] Error: Could not open " << archivePath << std::endl;
+        return;
+    }
+
+    if (!archive.checkFile()) {
+        std::cerr << "[!] Error: Invalid file " << archivePath << std::endl;
+        return;
+    }
+
+    if (!archive.getCArchiveInfo()) {
+        std::cerr << "[!] Error: Could not extract TOC from " << archivePath << std::endl;
+        return;
+    }
+
+    if (command == "-i") {
+        archive.displayInfo();  // Display information about the archive (filenames, sizes)
+    }
+    else if (command == "-u") {
+        archive.extractFiles(outputDir);  // Extract files to the specified directory
+    }
+    else {
+        std::cerr << "[!] Unknown command: " << command << std::endl;
+    }
+}
+
+/**
+ * @brief The entry point for the application.
+ *
+ * This function processes the command-line arguments by calling `parseArgs`,
+ * which handles the input commands to either display information or extract
+ * files from a PyInstaller archive.
+ *
+ * @param argc The number of command-line arguments.
+ * @param argv The array of command-line arguments.
+ *
+ * @return Returns 0 upon successful execution.
+ *
+ * @note The `parseArgs` function handles any errors or invalid arguments,
+ *       so no error handling is required in this function.
+ */
+int main(int argc, char* argv[]) {
+    parseArgs(argc, argv);
+    return 0;
 }

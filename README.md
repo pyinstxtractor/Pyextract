@@ -17,8 +17,8 @@ A C++ tool to inspect and extract contents from PyInstaller archives.
 ### Build
 1. Clone the repo:
     ```sh
-    git clone https://github.com/your_username/PyInstallerArchiveViewer.git
-    cd PyInstallerArchiveViewer
+    git clone https://github.com/pyinstxtractor/Pyextract.git
+    cd Pyextract
     ```
 2. Build:
 3. ```
@@ -27,35 +27,7 @@ A C++ tool to inspect and extract contents from PyInstaller archives.
 
 ### Run
     sh
-    PyInstallerArchiveViewer.exe path/to/your/archive
+    PyInstaller-C++.exe path/to/your/executable
     
 
-## Example
 
-```cpp
-#include <iostream>
-#include "PyInstArchive.h"
-
-int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        std::cerr << "Usage: " << argv[0] << " <path/to/pyinstaller_archive>" << std::endl;
-        return 1;
-    }
-
-    PyInstArchive archive(argv[1]);
-
-    if (!archive.open()) return 1;
-    if (!archive.checkFile()) {
-        archive.close();
-        return 1;
-    }
-    if (!archive.getCArchiveInfo()) {
-        archive.close();
-        return 1;
-    }
-
-    archive.viewFiles();
-    archive.close();
-
-    return 0;
-}

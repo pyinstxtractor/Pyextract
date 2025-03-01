@@ -29,6 +29,10 @@ struct CTOCEntry {
     const std::string& getName() const {
         return name; 
     }
+
+    bool isCompressed() const {
+        return cmprsFlag != 0;  
+    }
 };
 
 // Class for handling the PyInstaller Archive
@@ -43,7 +47,9 @@ public:
     bool checkFile();
     bool getCArchiveInfo();
     void parseTOC();
-    void viewFiles();
+    void extractFiles(const std::string& outputDir);
+    void displayInfo();
+    void decompressData(const std::vector<char>& compressedData, std::vector<char>& decompressedData);
 
 private:
     std::string filePath;          // Path to the archive file
