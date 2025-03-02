@@ -130,7 +130,6 @@ bool PyInstArchive::checkFile() {
     return true;
 }
 
-
 /**
  * @brief Swaps the byte order of a 32-bit integer to correct endianness.
  *
@@ -162,12 +161,12 @@ bool PyInstArchive::getCArchiveInfo() {
 
         // Check for version and load relevant data
         fPtr.seekg(cookiePos, std::ios::beg);
-        char buffer[PYINST21_COOKIE_SIZE];  // Use a single buffer to handle both versions if possible
+        char buffer[PYINST21_COOKIE_SIZE];  // Use a single buffer to handle both versions
         fPtr.read(buffer, (pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE);
 
         // Directly read values from the buffer
         if (pyinstVer == 20 || pyinstVer == 21) {
-            // Read and immediately swap bytes (combine reading and byte order correction in one step)
+            // Read and immediately swap bytes
             lengthofPackage = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 8));
             toc = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 12));
             tocLen = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 16));
@@ -194,7 +193,7 @@ bool PyInstArchive::getCArchiveInfo() {
         std::cout << "[DEBUG] tableOfContentsSize: " << tableOfContentsSize << std::endl;
 #endif
 
-        parseTOC();  // Always included, regardless of the mode
+        parseTOC();
 
 #ifdef _DEBUG
         std::cout << "[DEBUG] Entry sizes in the CArchive:" << std::endl;
@@ -228,7 +227,7 @@ void PyInstArchive::parseTOC() {
     tocList.clear();  // Clear any existing TOC entries
     uint32_t parsedLen = 0;  // Initialize parsed length
 
-    // Read the Table of Contents in chunks to reduce file reads
+    // Read the Table of Contents in chunks
     while (parsedLen < tableOfContentsSize) {
         uint32_t entrySize;
         fPtr.read(reinterpret_cast<char*>(&entrySize), sizeof(entrySize));
@@ -239,7 +238,7 @@ void PyInstArchive::parseTOC() {
         uint32_t nameLen = sizeof(uint32_t) + sizeof(uint32_t) * 3 + sizeof(uint8_t) + sizeof(char);
         std::vector<char> nameBuffer(entrySize - nameLen);  // Create buffer for the name
 
-        // Read the rest of the fields in one go to minimize file reads
+        // Read the rest of the fields in one go
         uint32_t entryPos, cmprsdDataSize, uncmprsdDataSize;
         uint8_t cmprsFlag;
         char typeCmprsData;
