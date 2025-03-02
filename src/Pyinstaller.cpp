@@ -3,18 +3,15 @@
 #include <vector>
 #include <string>
 #include <cstring>
-#include <winsock2.h>
 #include <random>
 #include <sstream>
 #include <filesystem>
 #include <queue>
 #include <condition_variable>
 #include <future>
+
 #include "../include/PyInstArchive.h"
 #include "../include/zlib.h"
-
-#pragma comment(lib, "ws2_32.lib")
-#pragma comment(lib, "oleaut32.lib")
 
 /**
  * @brief The magic string used to identify PyInstaller archives.
@@ -212,7 +209,6 @@ bool PyInstArchive::getCArchiveInfo() {
     return true;
 }
 
-
 /**
  * @brief Parses the Table of Contents (TOC) from the PyInstaller archive.
  *
@@ -282,7 +278,6 @@ void PyInstArchive::parseTOC() {
     // Output the total number of entries found in the TOC
     std::cout << "[+] Found " << tocList.size() << " files in CArchive" << std::endl;
 }
-
 
 /**
  * @brief Displays the list of files in the PyInstaller archive.
@@ -394,7 +389,6 @@ void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const st
         std::cout << "[+] Extracted: " << tocEntry.getName() << " (" << decompressedData.size() << " bytes)" << std::endl;
     }
 }
-
 
 /**
  * @brief Parses command-line arguments for interacting with a PyInstaller archive.
