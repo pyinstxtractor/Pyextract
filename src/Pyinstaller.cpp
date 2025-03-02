@@ -80,21 +80,30 @@ bool PyInstArchive::checkFile() {
         return false;
     }
 
-    while (true) {
+    std::vector<char> buffer(searchChunkSize + MAGIC.size() - 1);
+
+    while (endPos >= MAGIC.size()) {
         uint64_t startPos = endPos >= searchChunkSize ? endPos - searchChunkSize : 0;
         size_t chunkSize = endPos - startPos;
-        if (chunkSize < MAGIC.size()) {
-            break;
-        }
-        fPtr.seekg(startPos, std::ios::beg);
-        std::vector<char> data(chunkSize);
-        fPtr.read(data.data(), chunkSize);
 
-        auto offs = std::string(data.data(), chunkSize).rfind(MAGIC);
-        if (offs != std::string::npos) {
-            cookiePos = startPos + offs;
+        fPtr.seekg(startPos, std::ios::beg);
+        fPtr.read(buffer.data(), chunkSize);
+
+        for (size_t i = chunkSize; i < buffer.size(); ++i) {
+            buffer[i] = buffer[i - chunkSize];
+        }
+
+        for (size_t i = chunkSize; i-- > 0;) {
+            if (std::memcmp(buffer.data() + i, MAGIC.c_str(), MAGIC.size()) == 0) {
+                cookiePos = startPos + i;
+                break;
+            }
+        }
+
+        if (cookiePos != -1) {
             break;
         }
+
         endPos = startPos + MAGIC.size() - 1;
         if (startPos == 0) {
             break;
@@ -107,9 +116,9 @@ bool PyInstArchive::checkFile() {
     }
 
     fPtr.seekg(cookiePos + PYINST20_COOKIE_SIZE, std::ios::beg);
-    std::vector<char> buffer(64);
-    fPtr.read(buffer.data(), 64);
-    if (std::string(buffer.data(), 64).find("python") != std::string::npos) {
+    std::vector<char> buffer64(64);
+    fPtr.read(buffer64.data(), 64);
+    if (std::string(buffer64.data(), 64).find("python") != std::string::npos) {
         std::cout << "[+] Pyinstaller version: 2.1+" << std::endl;
         pyinstVer = 21;
     }
@@ -120,6 +129,7 @@ bool PyInstArchive::checkFile() {
 
     return true;
 }
+
 
 /**
  * @brief Swaps the byte order of a 32-bit integer to correct endianness.
@@ -150,62 +160,51 @@ bool PyInstArchive::getCArchiveInfo() {
     try {
         uint32_t lengthofPackage, toc, tocLen, pyver;
 
-        if (pyinstVer == 20) {
-            fPtr.seekg(cookiePos, std::ios::beg);
-            char buffer[PYINST20_COOKIE_SIZE];
-            fPtr.read(buffer, PYINST20_COOKIE_SIZE);
-            std::memcpy(&lengthofPackage, buffer + 8, 4);
-            std::memcpy(&toc, buffer + 12, 4);
-            std::memcpy(&tocLen, buffer + 16, 4);
-            std::memcpy(&pyver, buffer + 20, 4);
-        }
-        else if (pyinstVer == 21) {
-            fPtr.seekg(cookiePos, std::ios::beg);
-            char buffer[PYINST21_COOKIE_SIZE];
-            fPtr.read(buffer, PYINST21_COOKIE_SIZE);
-            std::memcpy(&lengthofPackage, buffer + 8, 4);
-            std::memcpy(&toc, buffer + 12, 4);
-            std::memcpy(&tocLen, buffer + 16, 4);
-            std::memcpy(&pyver, buffer + 20, 4);
+        // Check for version and load relevant data
+        fPtr.seekg(cookiePos, std::ios::beg);
+        char buffer[PYINST21_COOKIE_SIZE];  // Use a single buffer to handle both versions if possible
+        fPtr.read(buffer, (pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE);
+
+        // Directly read values from the buffer
+        if (pyinstVer == 20 || pyinstVer == 21) {
+            // Read and immediately swap bytes (combine reading and byte order correction in one step)
+            lengthofPackage = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 8));
+            toc = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 12));
+            tocLen = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 16));
+            pyver = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 20));
         }
 
-        // Convert values to host byte order (correcting endianness)
-        lengthofPackage = swapBytes(lengthofPackage);
-        toc = swapBytes(toc);
-        tocLen = swapBytes(tocLen);
-        pyver = swapBytes(pyver);
-
-        if (pyver >= 100) {
-            pymaj = pyver / 100;
-            pymin = pyver % 100;
-        }
-        else {
-            pymaj = pyver / 10;
-            pymin = pyver % 10;
-        }
+        // Python version determination
+        pymaj = pyver / (pyver >= 100 ? 100 : 10);
+        pymin = pyver % (pyver >= 100 ? 100 : 10);
 
         std::cout << "[+] Python version: " << static_cast<int>(pymaj) << "." << static_cast<int>(pymin) << std::endl;
 
-        uint64_t tailBytes = fileSize - cookiePos - (pyinstVer == 20 ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE);
+        uint64_t tailBytes = fileSize - cookiePos - ((pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE);
         overlaySize = static_cast<uint64_t>(lengthofPackage) + tailBytes;
         overlayPos = fileSize - overlaySize;
         tableOfContentsPos = overlayPos + toc;
         tableOfContentsSize = tocLen;
 
+#ifdef _DEBUG
         std::cout << "[+] Length of package: " << lengthofPackage << " bytes" << std::endl;
         std::cout << "[DEBUG] overlaySize: " << overlaySize << std::endl;
         std::cout << "[DEBUG] overlayPos: " << overlayPos << std::endl;
         std::cout << "[DEBUG] tableOfContentsPos: " << tableOfContentsPos << std::endl;
         std::cout << "[DEBUG] tableOfContentsSize: " << tableOfContentsSize << std::endl;
+#endif
 
-        parseTOC();
+        parseTOC();  // Always included, regardless of the mode
 
-        std::cout << "[INFO] Entry sizes in the CArchive:" << std::endl;
+#ifdef _DEBUG
+        std::cout << "[DEBUG] Entry sizes in the CArchive:" << std::endl;
         for (const auto& entry : tocList) {
-            std::cout << "[INFO] Entry Name: " << entry.getName()
+            std::cout << "[DEBUG] Entry Name: " << entry.getName()
                 << ", Compressed Size: " << entry.getCompressedDataSize() << " bytes"
                 << std::endl;
         }
+#endif
+
     }
     catch (...) {
         std::cerr << "[!] Error: The file is not a PyInstaller archive" << std::endl;
@@ -213,6 +212,7 @@ bool PyInstArchive::getCArchiveInfo() {
     }
     return true;
 }
+
 
 /**
  * @brief Parses the Table of Contents (TOC) from the PyInstaller archive.
@@ -222,64 +222,55 @@ bool PyInstArchive::getCArchiveInfo() {
  * Each entry is stored in a list for further processing.
  */
 void PyInstArchive::parseTOC() {
-   
     // Set the file pointer to the position of the Table of Contents
     fPtr.seekg(tableOfContentsPos, std::ios::beg);
 
     tocList.clear();  // Clear any existing TOC entries
     uint32_t parsedLen = 0;  // Initialize parsed length
 
-    // Continue parsing until the total size of the TOC is reached
+    // Read the Table of Contents in chunks to reduce file reads
     while (parsedLen < tableOfContentsSize) {
         uint32_t entrySize;
-        fPtr.read(reinterpret_cast<char*>(&entrySize), sizeof(entrySize));  // Read the entry size
+        fPtr.read(reinterpret_cast<char*>(&entrySize), sizeof(entrySize));
+        if (fPtr.gcount() < sizeof(entrySize)) break;  // Prevent reading beyond the file
+
         entrySize = swapBytes(entrySize);  // Convert entry size to host byte order
 
-        // Debugging output for entry size
-        std::cout << "[DEBUG] Entry Size: " << entrySize << ", Parsed Length: " << parsedLen << std::endl;
-
-        // Calculate the length of the name and allocate buffer
         uint32_t nameLen = sizeof(uint32_t) + sizeof(uint32_t) * 3 + sizeof(uint8_t) + sizeof(char);
         std::vector<char> nameBuffer(entrySize - nameLen);  // Create buffer for the name
 
-        // Variables to hold entry information
+        // Read the rest of the fields in one go to minimize file reads
         uint32_t entryPos, cmprsdDataSize, uncmprsdDataSize;
         uint8_t cmprsFlag;
         char typeCmprsData;
 
-        // Read the other fields from the file
         fPtr.read(reinterpret_cast<char*>(&entryPos), sizeof(entryPos));
         fPtr.read(reinterpret_cast<char*>(&cmprsdDataSize), sizeof(cmprsdDataSize));
         fPtr.read(reinterpret_cast<char*>(&uncmprsdDataSize), sizeof(uncmprsdDataSize));
         fPtr.read(reinterpret_cast<char*>(&cmprsFlag), sizeof(cmprsFlag));
         fPtr.read(reinterpret_cast<char*>(&typeCmprsData), sizeof(typeCmprsData));
-        fPtr.read(nameBuffer.data(), entrySize - nameLen);
 
-        // Debugging output for each field read
-        std::cout << "[DEBUG] Entry Position: " << swapBytes(entryPos) << std::endl;
-        std::cout << "[DEBUG] Compressed Data Size: " << swapBytes(cmprsdDataSize) << std::endl;
-        std::cout << "[DEBUG] Uncompressed Data Size: " << swapBytes(uncmprsdDataSize) << std::endl;
-        std::cout << "[DEBUG] Compression Flag: " << static_cast<int>(cmprsFlag) << std::endl;
-        std::cout << "[DEBUG] Type of Compressed Data: " << typeCmprsData << std::endl;
+        // swap bytes if needed (endian-aware file format)
+        entryPos = swapBytes(entryPos);
+        cmprsdDataSize = swapBytes(cmprsdDataSize);
+        uncmprsdDataSize = swapBytes(uncmprsdDataSize);
+
+        fPtr.read(nameBuffer.data(), entrySize - nameLen);
 
         // Decode the name from the buffer and remove null characters
         std::string name(nameBuffer.data(), nameBuffer.size());
         name.erase(std::remove(name.begin(), name.end(), '\0'), name.end());
 
-        // Debugging output for the name
-        std::cout << "[DEBUG] Name: '" << name << "'" << std::endl;
-
         // Handle invalid names and normalize
         if (name.empty() || name[0] == '/') {
             name = "unnamed_" + std::to_string(parsedLen);
-            std::cout << "[DEBUG] Normalized Name: '" << name << "'" << std::endl;  // Debugging normalized name
         }
 
         // Add the entry to the TOC list
         tocList.emplace_back(
-            overlayPos + swapBytes(entryPos),
-            swapBytes(cmprsdDataSize),
-            swapBytes(uncmprsdDataSize),
+            overlayPos + entryPos,
+            cmprsdDataSize,
+            uncmprsdDataSize,
             cmprsFlag,
             typeCmprsData,
             name
@@ -291,8 +282,8 @@ void PyInstArchive::parseTOC() {
 
     // Output the total number of entries found in the TOC
     std::cout << "[+] Found " << tocList.size() << " files in CArchive" << std::endl;
-
 }
+
 
 /**
  * @brief Displays the list of files in the PyInstaller archive.
@@ -337,7 +328,6 @@ void PyInstArchive::timeExtractionProcess(const std::string& outputDir) {
     std::cout << "Time: " << std::setfill('0') << minutes << ":"
         << std::fixed << std::setprecision(2) << std::setw(5) << seconds << std::endl;
 }
-
 
 /**
  * @brief Decompresses and extracts a file from the PyInstaller archive to the specified output directory.
@@ -406,27 +396,6 @@ void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const st
     }
 }
 
-/**
- * @brief Decompresses data using zlib.
- *
- * Decompresses `compressedData` into `decompressedData` using zlib.
- * Ensure `decompressedData` has enough space for the decompressed output.
- *
- * @param compressedData Input vector of compressed data.
- * @param decompressedData Output vector for decompressed data.
- *
- * @note Prints an error message if decompression fails.
- */
-void PyInstArchive::decompressData(const std::vector<char>& compressedData, std::vector<char>& decompressedData) {
-    uLongf decompressedSize = decompressedData.size();
-    int result = uncompress(reinterpret_cast<Bytef*>(decompressedData.data()), &decompressedSize,
-        reinterpret_cast<const Bytef*>(compressedData.data()), compressedData.size());
-
-    if (result != Z_OK) {
-        std::cerr << "[!] Error: Decompression failed" << std::endl;
-        // Optionally, you could also throw an exception or handle the error more specifically
-    }
-}
 
 /**
  * @brief Parses command-line arguments for interacting with a PyInstaller archive.
