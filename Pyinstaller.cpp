@@ -8,6 +8,9 @@
 #include <random>
 #include <sstream>
 #include <filesystem>
+#include <queue>
+#include <condition_variable>
+#include <future>
 #include "zlib.h"
 
 #pragma comment(lib, "ws2_32.lib")
@@ -307,72 +310,98 @@ void PyInstArchive::displayInfo() {
 }
 
 /**
- * @brief Extracts files from a PyInstaller archive to a specified directory.
+ * @brief Measures and outputs the total time taken to decompress and extract files from the PyInstaller archive.
  *
- * This method iterates through the Table of Contents (TOC) of the archive and extracts each file.
- * For compressed entries, it decompresses the data using zlib and writes it to the output directory.
- * Uncompressed data is written as-is.
- *
- * @param outputDir The directory where extracted files will be saved.
- *
- * @note The output directory and its subdirectories will be created if they do not exist.
- * @note Errors are logged if any file extraction or decompression fails.
+ * This function launches asynchronous tasks for each file in the Table of Contents (TOC) to decompress
+ * and extract them to the specified output directory. The tasks are managed using `std::async` and the
+ * time taken for the entire extraction process is measured using `std::chrono`.
+ * 
+ * @param outputDir The directory where the extracted files will be saved.
  */
-void PyInstArchive::extractFiles(const std::string& outputDir) {
+void PyInstArchive::timeExtractionProcess(const std::string& outputDir) {
+    auto start = std::chrono::steady_clock::now();
+
+    std::vector<std::future<void>> futures;
     for (const auto& tocEntry : tocList) {
-        // Move the file pointer to the position of the compressed data
+        futures.emplace_back(std::async(std::launch::async, &PyInstArchive::decompressAndExtractFile, this, std::ref(tocEntry), std::ref(outputDir)));
+    }
+
+    for (auto& future : futures) {
+        future.get();
+    }
+
+    auto end = std::chrono::steady_clock::now();
+    std::chrono::duration<double> elapsedSeconds = end - start;
+    int minutes = static_cast<int>(elapsedSeconds.count()) / 60;
+    double seconds = elapsedSeconds.count() - (minutes * 60);
+    std::cout << "Time: " << std::setfill('0') << minutes << ":"
+        << std::fixed << std::setprecision(2) << std::setw(5) << seconds << std::endl;
+}
+
+
+/**
+ * @brief Decompresses and extracts a file from the PyInstaller archive to the specified output directory.
+ *
+ * This function reads the compressed data of the file from the archive, decompresses it if necessary,
+ * and writes the resulting data to a file in the specified output directory. The file extraction process
+ * is thread-safe, utilizing mutexes to ensure proper synchronization of file reading and console output.
+ *
+ * @param tocEntry The Table of Contents (TOC) entry that contains metadata about the file to be extracted.
+ * @param outputDir The directory where the extracted file will be saved.
+ */
+void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const std::string& outputDir) {
+    std::vector<char> compressedData;
+    {
+        std::lock_guard<std::mutex> lock(mtx);
         fPtr.seekg(tocEntry.position, std::ios::beg);
-
-        // Read the compressed data into a vector
-        std::vector<char> compressedData(tocEntry.getCompressedDataSize());
+        compressedData.resize(tocEntry.getCompressedDataSize());
         fPtr.read(compressedData.data(), tocEntry.getCompressedDataSize());
+    }
 
-        std::vector<char> decompressedData;
+    // Decompress data
+    std::vector<char> decompressedData;
+    if (tocEntry.isCompressed()) {
+        decompressedData.resize(tocEntry.uncmprsdDataSize);
 
-        if (tocEntry.isCompressed()) {
-            // If the entry is compressed, decompress the data using zlib
-            decompressedData.resize(tocEntry.uncmprsdDataSize);
+        z_stream strm = {};
+        strm.avail_in = tocEntry.getCompressedDataSize();
+        strm.next_in = reinterpret_cast<Bytef*>(compressedData.data());
+        strm.avail_out = tocEntry.uncmprsdDataSize;
+        strm.next_out = reinterpret_cast<Bytef*>(decompressedData.data());
 
-            z_stream strm = {};
-            strm.avail_in = tocEntry.getCompressedDataSize();
-            strm.next_in = reinterpret_cast<Bytef*>(compressedData.data());
-            strm.avail_out = tocEntry.uncmprsdDataSize;
-            strm.next_out = reinterpret_cast<Bytef*>(decompressedData.data());
-
-            if (inflateInit(&strm) != Z_OK) {
-                std::cerr << "[!] Error: Could not initialize zlib for decompression" << std::endl;
-                continue;
-            }
-
-            int result = inflate(&strm, Z_FINISH);
-            inflateEnd(&strm);
-
-            if (result != Z_STREAM_END) {
-                std::cerr << "[!] Error: Decompression failed for " << tocEntry.getName() << std::endl;
-                continue;
-            }
-        }
-        else {
-            // If the data is not compressed, just use the original data
-            decompressedData = compressedData;
+        if (inflateInit(&strm) != Z_OK) {
+            std::cerr << "[!] Error: Could not initialize zlib for decompression" << std::endl;
+            return;
         }
 
-        // Construct the full output file path
-        std::filesystem::path outputFilePath = std::filesystem::path(outputDir) / tocEntry.getName();
+        int result = inflate(&strm, Z_FINISH);
+        inflateEnd(&strm);
 
-        // Ensure the directory exists
-        std::filesystem::create_directories(outputFilePath.parent_path());
-
-        // Write the decompressed data to the output file
-        std::ofstream outFile(outputFilePath, std::ios::binary);
-        if (!outFile.is_open()) {
-            std::cerr << "[!] Error: Could not open output file " << outputFilePath << std::endl;
-            continue;
+        if (result != Z_STREAM_END) {
+            std::cerr << "[!] Error: Decompression failed for " << tocEntry.getName() << std::endl;
+            return;
         }
+    }
+    else {
+        decompressedData = compressedData;
+    }
 
-        outFile.write(decompressedData.data(), decompressedData.size());
-        outFile.close();
+    // Extract file
+    std::filesystem::path outputFilePath = std::filesystem::path(outputDir) / tocEntry.getName();
+    std::filesystem::create_directories(outputFilePath.parent_path());
 
+    std::ofstream outFile(outputFilePath, std::ios::binary);
+    if (!outFile.is_open()) {
+        std::cerr << "[!] Error: Could not open output file " << outputFilePath << std::endl;
+        return;
+    }
+
+    outFile.write(decompressedData.data(), decompressedData.size());
+    outFile.close();
+
+    // Synchronize print statements
+    {
+        std::lock_guard<std::mutex> printLock(printMtx);
         std::cout << "[+] Extracted: " << tocEntry.getName() << " (" << decompressedData.size() << " bytes)" << std::endl;
     }
 }
@@ -450,7 +479,7 @@ void parseArgs(int argc, char* argv[]) {
         archive.displayInfo();  // Display information about the archive (filenames, sizes)
     }
     else if (command == "-u") {
-        archive.extractFiles(outputDir);  // Extract files to the specified directory
+        archive.timeExtractionProcess(outputDir);  // Extract files to the specified directory
     }
     else {
         std::cerr << "[!] Unknown command: " << command << std::endl;

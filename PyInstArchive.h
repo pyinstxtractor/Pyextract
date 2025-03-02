@@ -7,6 +7,7 @@
 #include <string>
 #include <cstring>
 #include <cstdint> 
+#include <mutex>
 
 // Structure for Table of Contents Entry
 struct CTOCEntry {
@@ -47,11 +48,14 @@ public:
     bool checkFile();
     bool getCArchiveInfo();
     void parseTOC();
-    void extractFiles(const std::string& outputDir);
+    void timeExtractionProcess(const std::string& outputDir);
+	void decompressAndExtractFile(const CTOCEntry& tocEntry, const std::string& outputDir);
     void displayInfo();
     void decompressData(const std::vector<char>& compressedData, std::vector<char>& decompressedData);
 
 private:
+    std::mutex mtx;
+    std::mutex printMtx; // Mutex for synchronizing print statements
     std::string filePath;          // Path to the archive file
     std::ifstream fPtr;           // File stream for reading the archive
     uint64_t fileSize;            // Size of the file
