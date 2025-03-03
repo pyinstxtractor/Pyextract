@@ -9,9 +9,13 @@
 #include <queue>
 #include <condition_variable>
 #include <future>
+#include <iomanip>
+#include <chrono>
 
 #include "../include/PyInstArchive.h"
 #include "../include/zlib.h"
+
+
 
 /**
  * @brief The magic string used to identify PyInstaller archives.
@@ -304,37 +308,68 @@ void PyInstArchive::displayInfo() {
  * @param outputDir The directory where the extracted files will be saved.
  */
 void PyInstArchive::timeExtractionProcess(const std::string& outputDir) {
-    auto start = std::chrono::steady_clock::now();
+    auto start = std::chrono::high_resolution_clock::now();
 
-    std::vector<std::future<void>> futures;
-    for (const auto& tocEntry : tocList) {
-        futures.emplace_back(std::async(std::launch::async, &PyInstArchive::decompressAndExtractFile, this, std::ref(tocEntry), std::ref(outputDir)));
-    }
+    MultiThreaedFileExtract(tocList, outputDir);
 
-    for (auto& future : futures) {
-        future.get();
-    }
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
 
-    auto end = std::chrono::steady_clock::now();
-    std::chrono::duration<double> elapsedSeconds = end - start;
-    int minutes = static_cast<int>(elapsedSeconds.count()) / 60;
-    double seconds = elapsedSeconds.count() - (minutes * 60);
-    std::cout << "Time: " << std::setfill('0') << minutes << ":"
-        << std::fixed << std::setprecision(2) << std::setw(5) << seconds << std::endl;
+    std::cout << "[*] Extraction completed in " << elapsed.count() << " seconds.\n";
 }
 
 /**
- * @brief Decompresses and extracts a file from the PyInstaller archive to the specified output directory.
+ * @brief Decompresses and extracts all files from the PyInstaller archive using multithreading.
  *
- * This function reads the compressed data of the file from the archive, decompresses it if necessary,
- * and writes the resulting data to a file in the specified output directory. The file extraction process
- * is thread-safe, utilizing mutexes to ensure proper synchronization of file reading and console output.
+ * The `MultiThreadedFileExtract` method initializes a thread pool and enqueues tasks to decompress
+ * and extract each file specified in the Table of Contents (TOC) entries. It leverages multithreading
+ * to improve extraction performance by processing multiple files concurrently.
  *
- * @param tocEntry The Table of Contents (TOC) entry that contains metadata about the file to be extracted.
- * @param outputDir The directory where the extracted file will be saved.
+ * @param tocEntries A vector of TOC entries representing the files to extract from the archive.
+ * @param outputDir  The directory where the extracted files will be saved.
+ *
+ * @note The function creates a thread pool with a number of threads equal to the hardware concurrency.
+ *       If the hardware concurrency cannot be determined, it defaults to 4 threads.
+ * @note Each TOC entry is processed by a separate task that calls `decompressAndExtractFile`.
+ * @note The mutexes `mtx` and `printMtx` are used within the tasks to ensure thread-safe operations.
+ * @note The ThreadPool destructor ensures all tasks are completed before the program continues.
  */
-void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const std::string& outputDir) {
+void PyInstArchive::MultiThreaedFileExtract(const std::vector<CTOCEntry>& tocEntries, const std::string& outputDir) {
+    size_t numThreads = std::thread::hardware_concurrency();
+    if (numThreads == 0) numThreads = 4; // Fallback if hardware_concurrency can't determine
+
+    ThreadPool pool(numThreads);
+
+    for (const auto& tocEntry : tocEntries) {
+        pool.enqueue([this, &tocEntry, &outputDir] {
+            this->decompressAndExtractFile(tocEntry, outputDir, mtx, printMtx);
+            });
+    }
+}
+
+/**
+ * @brief Decompresses and extracts a single file from the PyInstaller archive.
+ *
+ * This method handles the decompression and extraction of a single file specified by the
+ * Table of Contents (TOC) entry. It reads the compressed data from the archive file,
+ * decompresses it if necessary, and writes the output to the specified directory,
+ * preserving the file structure. Thread safety is ensured through mutex locks for file
+ * access and console output, allowing concurrent execution in a multithreaded environment.
+ *
+ * @param tocEntry  The Table of Contents entry representing the file to extract.
+ * @param outputDir The directory where the extracted file will be saved.
+ * @param mtx       Mutex to synchronize access to the file stream `fPtr` for reading.
+ * @param printMtx  Mutex to synchronize console output to prevent message interleaving.
+ *
+ * @note The function checks if the data is compressed and handles decompression using zlib.
+ * @note Any errors during reading, decompression, or writing are logged to the console.
+ * @note The function assumes that the output directory exists or can be created.
+ * @note This method is designed to be thread-safe and can be called concurrently by multiple threads.
+ */
+void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const std::string& outputDir, std::mutex& mtx, std::mutex& printMtx) {
     std::vector<char> compressedData;
+
+    // Read Compressed Data with File Lock
     {
         std::lock_guard<std::mutex> lock(mtx);
         fPtr.seekg(tocEntry.position, std::ios::beg);
@@ -342,19 +377,20 @@ void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const st
         fPtr.read(compressedData.data(), tocEntry.getCompressedDataSize());
     }
 
-    // Decompress data
+    // Decompress Data
     std::vector<char> decompressedData;
     if (tocEntry.isCompressed()) {
         decompressedData.resize(tocEntry.uncmprsdDataSize);
 
         z_stream strm = {};
-        strm.avail_in = tocEntry.getCompressedDataSize();
+        strm.avail_in = static_cast<uInt>(tocEntry.getCompressedDataSize());
         strm.next_in = reinterpret_cast<Bytef*>(compressedData.data());
-        strm.avail_out = tocEntry.uncmprsdDataSize;
+        strm.avail_out = static_cast<uInt>(tocEntry.uncmprsdDataSize);
         strm.next_out = reinterpret_cast<Bytef*>(decompressedData.data());
 
         if (inflateInit(&strm) != Z_OK) {
-            std::cerr << "[!] Error: Could not initialize zlib for decompression" << std::endl;
+            std::lock_guard<std::mutex> lock(printMtx);
+            std::cerr << "[!] Error: Could not initialize zlib for decompression\n";
             return;
         }
 
@@ -362,31 +398,33 @@ void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const st
         inflateEnd(&strm);
 
         if (result != Z_STREAM_END) {
-            std::cerr << "[!] Error: Decompression failed for " << tocEntry.getName() << std::endl;
+            std::lock_guard<std::mutex> lock(printMtx);
+            std::cerr << "[!] Error: Decompression failed for " << tocEntry.getName() << "\n";
             return;
         }
     }
     else {
-        decompressedData = compressedData;
+        decompressedData = std::move(compressedData);
     }
 
-    // Extract file
+    // Extract File
     std::filesystem::path outputFilePath = std::filesystem::path(outputDir) / tocEntry.getName();
     std::filesystem::create_directories(outputFilePath.parent_path());
 
-    std::ofstream outFile(outputFilePath, std::ios::binary);
-    if (!outFile.is_open()) {
-        std::cerr << "[!] Error: Could not open output file " << outputFilePath << std::endl;
-        return;
+    {
+        std::ofstream outFile(outputFilePath, std::ios::binary);
+        if (!outFile.is_open()) {
+            std::lock_guard<std::mutex> lock(printMtx);
+            std::cerr << "[!] Error: Could not open output file " << outputFilePath << "\n";
+            return;
+        }
+        outFile.write(decompressedData.data(), decompressedData.size());
     }
 
-    outFile.write(decompressedData.data(), decompressedData.size());
-    outFile.close();
-
-    // Synchronize print statements
+    // Log Extraction Success
     {
-        std::lock_guard<std::mutex> printLock(printMtx);
-        std::cout << "[+] Extracted: " << tocEntry.getName() << " (" << decompressedData.size() << " bytes)" << std::endl;
+        std::lock_guard<std::mutex> lock(printMtx);
+        std::cout << "[+] Extracted: " << tocEntry.getName() << " (" << decompressedData.size() << " bytes)\n";
     }
 }
 

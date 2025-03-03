@@ -20,11 +20,13 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\PyInstArchive.h" />
+    <ClInclude Include="include\ThreadPool.h" />
     <ClInclude Include="include\zconf.h" />
     <ClInclude Include="include\zlib.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Pyinstaller.cpp" />
+    <ClCompile Include="src\ThreadPool.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
