@@ -11,6 +11,7 @@
 #include <future>
 #include <iomanip>
 #include <chrono>
+#include <Windows.h>
 
 #include "../include/PyInstArchive.h"
 #include "../include/zlib.h"
@@ -59,6 +60,22 @@ void PyInstArchive::close() {
     if (fPtr.is_open()) {
         fPtr.close();
     }
+}
+
+/**
+ * @brief Retrieves the list of Table of Contents (TOC) entries from the PyInstaller archive.
+ *
+ * This method returns a constant reference to the vector containing the TOC entries.
+ * The TOC entries represent individual files within the PyInstaller archive, including their
+ * positions, compressed sizes, uncompressed sizes, compression flags, data types, and names.
+ *
+ * @return A constant reference to a vector of CTOCEntry objects representing the TOC entries.
+ *
+ * @note The vector returned by this method is read-only, ensuring the TOC entries cannot be modified
+ *       directly through the returned reference. To modify the TOC entries, use appropriate member functions.
+ */
+const std::vector<CTOCEntry>& PyInstArchive::getTOCList() const {
+    return tocList;
 }
 
 /**
@@ -145,6 +162,59 @@ uint32_t swapBytes(uint32_t value) {
         ((value >> 8) & 0x0000FF00) |
         ((value << 8) & 0x00FF0000) |
         ((value << 24) & 0xFF000000);
+}
+
+/**
+ * @brief Retrieves the number of physical CPU cores on the system.
+ *
+ * This function uses the Windows API to obtain information about the system's logical processors
+ * and their relationship to physical CPU cores. It first determines the required buffer size for
+ * the processor information, allocates the buffer, and then retrieves the information.
+ *
+ * The function iterates through the retrieved data to count the number of physical cores and
+ * returns this count. If an error occurs at any stage, the function outputs an error message and
+ * returns a default value of 1.
+ *
+ * @return The number of physical CPU cores on the system. If an error occurs, returns 1.
+ *
+ * @note This function is platform-specific and intended for use on Windows systems.
+ * @note The function uses `malloc` for buffer allocation and `free` for deallocation.
+ */
+size_t getPhysicalCoreCount() {
+    DWORD length = 0;
+    // Initial call to get buffer size
+    GetLogicalProcessorInformation(nullptr, &length);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+        std::cerr << "[!] Error: Unable to determine buffer size for processor information.\n";
+        return 1; // Default to 1 if unable to determine
+    }
+
+    // Allocate buffer for processor information
+    SYSTEM_LOGICAL_PROCESSOR_INFORMATION* buffer = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION*>(malloc(length));
+    if (buffer == nullptr) {
+        std::cerr << "[!] Error: Memory allocation failed.\n";
+        return 1;
+    }
+
+    // Retrieve processor information
+    if (!GetLogicalProcessorInformation(buffer, &length)) {
+        std::cerr << "[!] Error: Unable to get logical processor information.\n";
+        free(buffer);
+        return 1;
+    }
+
+    DWORD processorCoreCount = 0;
+    DWORD count = length / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION);
+
+    // Count the number of physical cores
+    for (DWORD i = 0; i < count; ++i) {
+        if (buffer[i].Relationship == RelationProcessorCore) {
+            processorCoreCount++;
+        }
+    }
+
+    free(buffer);
+    return static_cast<size_t>(processorCoreCount);
 }
 
 /**
@@ -308,9 +378,13 @@ void PyInstArchive::displayInfo() {
  * @param outputDir The directory where the extracted files will be saved.
  */
 void PyInstArchive::timeExtractionProcess(const std::string& outputDir) {
+    // Determine the number of physical cores to use as threads
+    size_t numThreads = getPhysicalCoreCount();
+
     auto start = std::chrono::high_resolution_clock::now();
 
-    MultiThreaedFileExtract(tocList, outputDir);
+    // Call MultiThreadedFileExtract with the required arguments
+    MultiThreadedFileExtract(tocList, outputDir, numThreads);
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end - start;
@@ -334,12 +408,30 @@ void PyInstArchive::timeExtractionProcess(const std::string& outputDir) {
  * @note The mutexes `mtx` and `printMtx` are used within the tasks to ensure thread-safe operations.
  * @note The ThreadPool destructor ensures all tasks are completed before the program continues.
  */
-void PyInstArchive::MultiThreaedFileExtract(const std::vector<CTOCEntry>& tocEntries, const std::string& outputDir) {
-    size_t numThreads = std::thread::hardware_concurrency();
-    if (numThreads == 0) numThreads = 4; // Fallback if hardware_concurrency can't determine
+void PyInstArchive::MultiThreadedFileExtract(const std::vector<CTOCEntry>& tocEntries, const std::string& outputDir, size_t numThreads) {
+    size_t maxCores = getPhysicalCoreCount();  // Function to get number of physical cores
 
+    // Validate user-specified number of threads
+    if (numThreads == 0) {
+        numThreads = maxCores;
+        std::cout << "[*] Using all available physical cores: " << numThreads << "\n";
+    }
+    else {
+        if (numThreads > maxCores) {
+            std::cout << "[!] Specified number of cores (" << numThreads << ") exceeds available physical cores (" << maxCores << "). Using maximum available cores.\n";
+            numThreads = maxCores;
+        }
+        else {
+            std::cout << "[*] Using user-specified number of cores: " << numThreads << "\n";
+        }
+    }
+
+    if (numThreads == 0) numThreads = 1;  // Ensure at least one thread
+
+    // Initialize ThreadPool with the specified number of threads
     ThreadPool pool(numThreads);
 
+    // Enqueue tasks
     for (const auto& tocEntry : tocEntries) {
         pool.enqueue([this, &tocEntry, &outputDir] {
             this->decompressAndExtractFile(tocEntry, outputDir, mtx, printMtx);
@@ -429,29 +521,81 @@ void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const st
 }
 
 /**
- * @brief Parses command-line arguments for interacting with a PyInstaller archive.
+ * @brief Parses command-line arguments and initiates the archive processing.
  *
- * This method processes the command-line arguments, checks if the required parameters
- * are provided, and then opens the specified PyInstaller archive. It can either display
- * information about the archive or extract its files to the specified output directory.
+ * This function handles the parsing of command-line arguments to determine the appropriate
+ * operation to perform on the PyInstaller archive. It supports specifying the number of cores
+ * to use for extraction, the command to execute (either to display information or to extract files),
+ * the path to the archive, and the optional output directory.
+ *
+ * Supported arguments:
+ * - `-cores N`: Specifies the number of cores to use for the extraction process. If not provided or set to 0, all available physical cores are used.
+ * - `-i`: Command to display information about the archive (filenames, sizes).
+ * - `-u`: Command to extract files from the archive.
+ * - `<archive_path>`: The path to the PyInstaller archive file.
+ * - `[output_dir]`: Optional output directory where the extracted files will be saved. Defaults to "unpacked".
+ *
+ * Example usage:
+ * - `unpack.exe -cores 4 -u archive_file.exe output_dir`
+ * - `unpack.exe -i archive_file.exe`
  *
  * @param argc The number of command-line arguments.
  * @param argv The array of command-line arguments.
- *
- * @note The command must be either "-i" to display archive information or "-u" to extract files.
- *       The archive path is required, and an optional output directory can be specified.
- * @note If the output directory does not exist, it will be created automatically.
- * @note Errors are logged if any arguments are invalid or if the archive cannot be processed.
  */
 void parseArgs(int argc, char* argv[]) {
+    // Default values
+    int numCores = 0; // 0 indicates 'use all available physical cores'
+    std::string command;
+    std::string archivePath;
+    std::string outputDir = "unpacked"; // Default output directory
+    int argIndex = 1;
+
+    // Check if there are enough arguments
     if (argc < 3) {
-        std::cerr << "[!] Usage: " << argv[0] << " [-i | -u] <archive_path> [output_dir]" << std::endl;
+        std::cerr << "[!] Usage: " << argv[0] << " [-cores N] [-i | -u] <archive_path> [output_dir]" << std::endl;
         exit(1);
     }
 
-    std::string command = argv[1];    // Command (-i or -u)
-    std::string archivePath = argv[2]; // Archive file path
-    std::string outputDir = (argc > 3) ? argv[3] : "unpacked"; // Output directory (default to "output")
+    // Parse arguments
+    while (argIndex < argc) {
+        std::string arg = argv[argIndex];
+
+        if (arg == "-cores") {
+            // Handle the -cores argument
+            argIndex++;
+            if (argIndex >= argc) {
+                std::cerr << "[!] Error: Expected number after -cores" << std::endl;
+                exit(1);
+            }
+            numCores = atoi(argv[argIndex]);
+            if (numCores <= 0) {
+                std::cerr << "[!] Invalid number of cores specified. Using all available physical cores." << std::endl;
+                numCores = 0;
+            }
+            argIndex++;
+        }
+        else if (arg == "-i" || arg == "-u") {
+            // Handle the command (-i or -u)
+            command = arg;
+            argIndex++;
+        }
+        else if (archivePath.empty()) {
+            // First argument that's not an option is the archive path
+            archivePath = arg;
+            argIndex++;
+        }
+        else {
+            // Optional output directory
+            outputDir = arg;
+            argIndex++;
+        }
+    }
+
+    // Validate required arguments
+    if (command.empty() || archivePath.empty()) {
+        std::cerr << "[!] Usage: " << argv[0] << " [-cores N] [-i | -u] <archive_path> [output_dir]" << std::endl;
+        exit(1);
+    }
 
     // Check if the output directory exists, create it if it doesn't
     if (!std::filesystem::exists(outputDir)) {
@@ -479,7 +623,8 @@ void parseArgs(int argc, char* argv[]) {
         archive.displayInfo();  // Display information about the archive (filenames, sizes)
     }
     else if (command == "-u") {
-        archive.timeExtractionProcess(outputDir);  // Extract files to the specified directory
+        archive.parseTOC();  // Parse the Table of Contents before extraction
+        archive.MultiThreadedFileExtract(archive.getTOCList(), outputDir, static_cast<size_t>(numCores));
     }
     else {
         std::cerr << "[!] Unknown command: " << command << std::endl;

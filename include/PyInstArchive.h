@@ -59,12 +59,9 @@ public:
     void parseTOC();
     void timeExtractionProcess(const std::string& outputDir);
     void displayInfo();
-    void decompressData(const std::vector<char>& compressedData, std::vector<char>& decompressedData);
-
-    // New methods for multithreading
-    void MultiThreaedFileExtract(const std::vector<CTOCEntry>& tocEntries, const std::string& outputDir);
+    void MultiThreadedFileExtract(const std::vector<CTOCEntry>& tocEntries, const std::string& outputDir, size_t numThreads);
     void decompressAndExtractFile(const CTOCEntry& tocEntry, const std::string& outputDir, std::mutex& mtx, std::mutex& printMtx);
-
+    const std::vector<CTOCEntry>& getTOCList() const;
 private:
     std::mutex mtx;       // Protects file pointer access
     std::mutex printMtx;  // Protects console output
