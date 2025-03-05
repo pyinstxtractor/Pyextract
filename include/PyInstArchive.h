@@ -67,6 +67,12 @@ public:
     void debugEntrySizes();
 
     void parseTOC();
+    bool readEntrySize(uint32_t& entrySize);
+    void readEntryFields(uint32_t& entryPos, uint32_t& cmprsdDataSize, uint32_t& uncmprsdDataSize, uint8_t& cmprsFlag, char& typeCmprsData, std::vector<char>& nameBuffer, uint32_t entrySize);
+    std::string decodeEntryName(std::vector<char>& nameBuffer, uint32_t parsedLen);
+    void addTOCEntry(uint32_t entryPos, uint32_t cmprsdDataSize, uint32_t uncmprsdDataSize, uint8_t cmprsFlag, char typeCmprsData, const std::string& name);
+    uint32_t sizeofEntry() const;
+
     void timeExtractionProcess(const std::string& outputDir);
     void displayInfo();
     void MultiThreadedFileExtract(const std::vector<CTOCEntry>& tocEntries, const std::string& outputDir, size_t numThreads);

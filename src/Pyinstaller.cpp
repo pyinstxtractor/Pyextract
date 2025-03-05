@@ -362,73 +362,122 @@ void PyInstArchive::debugEntrySizes() {
 #endif
 
 /**
- * @brief Parses the Table of Contents (TOC) from the PyInstaller archive.
+ * @brief Parse the Table of Contents (TOC) of the CArchive.
  *
- * This function reads the TOC from the archive, which contains information about the
- * embedded files, such as their size, position in the archive, compression status, and type.
- * Each entry is stored in a list for further processing.
+ * This function reads the TOC from the PyInstaller archive and extracts
+ * the necessary metadata for each entry, storing them in a list.
  */
 void PyInstArchive::parseTOC() {
-    // Set the file pointer to the position of the Table of Contents
     fPtr.seekg(tableOfContentsPos, std::ios::beg);
+    tocList.clear();
+    uint32_t parsedLen = 0;
 
-    tocList.clear();  // Clear any existing TOC entries
-    uint32_t parsedLen = 0;  // Initialize parsed length
-
-    // Read the Table of Contents in chunks
     while (parsedLen < tableOfContentsSize) {
         uint32_t entrySize;
-        fPtr.read(reinterpret_cast<char*>(&entrySize), sizeof(entrySize));
-        if (fPtr.gcount() < sizeof(entrySize)) break;  // Prevent reading beyond the file
+        if (!readEntrySize(entrySize)) break;
 
-        entrySize = swapBytes(entrySize);  // Convert entry size to host byte order
-
-        uint32_t nameLen = sizeof(uint32_t) + sizeof(uint32_t) * 3 + sizeof(uint8_t) + sizeof(char);
-        std::vector<char> nameBuffer(entrySize - nameLen);  // Create buffer for the name
-
-        // Read the rest of the fields in one go
+        std::vector<char> nameBuffer(entrySize - sizeofEntry());
         uint32_t entryPos, cmprsdDataSize, uncmprsdDataSize;
         uint8_t cmprsFlag;
         char typeCmprsData;
 
-        fPtr.read(reinterpret_cast<char*>(&entryPos), sizeof(entryPos));
-        fPtr.read(reinterpret_cast<char*>(&cmprsdDataSize), sizeof(cmprsdDataSize));
-        fPtr.read(reinterpret_cast<char*>(&uncmprsdDataSize), sizeof(uncmprsdDataSize));
-        fPtr.read(reinterpret_cast<char*>(&cmprsFlag), sizeof(cmprsFlag));
-        fPtr.read(reinterpret_cast<char*>(&typeCmprsData), sizeof(typeCmprsData));
+        readEntryFields(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, nameBuffer, entrySize);
 
-        // swap bytes if needed (endian-aware file format)
-        entryPos = swapBytes(entryPos);
-        cmprsdDataSize = swapBytes(cmprsdDataSize);
-        uncmprsdDataSize = swapBytes(uncmprsdDataSize);
+        std::string name = decodeEntryName(nameBuffer, parsedLen);
+        addTOCEntry(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, name);
 
-        fPtr.read(nameBuffer.data(), entrySize - nameLen);
-
-        // Decode the name from the buffer and remove null characters
-        std::string name(nameBuffer.data(), nameBuffer.size());
-        name.erase(std::remove(name.begin(), name.end(), '\0'), name.end());
-
-        // Handle invalid names and normalize
-        if (name.empty() || name[0] == '/') {
-            name = "unnamed_" + std::to_string(parsedLen);
-        }
-
-        // Add the entry to the TOC list
-        tocList.emplace_back(
-            overlayPos + entryPos,
-            cmprsdDataSize,
-            uncmprsdDataSize,
-            cmprsFlag,
-            typeCmprsData,
-            name
-        );
-
-        // Update the parsed length by the size of the current entry
         parsedLen += entrySize;
     }
 
-    // Output the total number of entries found in the TOC
     std::cout << "[+] Found " << tocList.size() << " files in CArchive" << std::endl;
+}
+
+/**
+ * @brief Read the size of the next TOC entry.
+ *
+ * @param entrySize Reference to store the size of the TOC entry.
+ * @return True if the entry size was successfully read, otherwise false.
+ */
+bool PyInstArchive::readEntrySize(uint32_t& entrySize) {
+    fPtr.read(reinterpret_cast<char*>(&entrySize), sizeof(entrySize));
+    if (fPtr.gcount() < sizeof(entrySize)) return false;
+
+    entrySize = swapBytes(entrySize);
+    return true;
+}
+
+/**
+ * @brief Read the fields of a TOC entry.
+ *
+ * @param entryPos Reference to store the entry position.
+ * @param cmprsdDataSize Reference to store the compressed data size.
+ * @param uncmprsdDataSize Reference to store the uncompressed data size.
+ * @param cmprsFlag Reference to store the compression flag.
+ * @param typeCmprsData Reference to store the type of compressed data.
+ * @param nameBuffer Buffer to store the entry name.
+ * @param entrySize The size of the entry.
+ */
+void PyInstArchive::readEntryFields(uint32_t& entryPos, uint32_t& cmprsdDataSize, uint32_t& uncmprsdDataSize, uint8_t& cmprsFlag, char& typeCmprsData, std::vector<char>& nameBuffer, uint32_t entrySize) {
+    uint32_t nameLen = sizeofEntry();
+    fPtr.read(reinterpret_cast<char*>(&entryPos), sizeof(entryPos));
+    fPtr.read(reinterpret_cast<char*>(&cmprsdDataSize), sizeof(cmprsdDataSize));
+    fPtr.read(reinterpret_cast<char*>(&uncmprsdDataSize), sizeof(uncmprsdDataSize));
+    fPtr.read(reinterpret_cast<char*>(&cmprsFlag), sizeof(cmprsFlag));
+    fPtr.read(reinterpret_cast<char*>(&typeCmprsData), sizeof(typeCmprsData));
+
+    entryPos = swapBytes(entryPos);
+    cmprsdDataSize = swapBytes(cmprsdDataSize);
+    uncmprsdDataSize = swapBytes(uncmprsdDataSize);
+
+    fPtr.read(nameBuffer.data(), entrySize - nameLen);
+}
+
+/**
+ * @brief Decode the entry name from the buffer and handle invalid names.
+ *
+ * @param nameBuffer Buffer containing the entry name.
+ * @param parsedLen The current parsed length of the TOC.
+ * @return The decoded and normalized entry name.
+ */
+std::string PyInstArchive::decodeEntryName(std::vector<char>& nameBuffer, uint32_t parsedLen) {
+    std::string name(nameBuffer.data(), nameBuffer.size());
+    name.erase(std::remove(name.begin(), name.end(), '\0'), name.end());
+
+    if (name.empty() || name[0] == '/') {
+        name = "unnamed_" + std::to_string(parsedLen);
+    }
+
+    return name;
+}
+
+/**
+ * @brief Add a TOC entry to the list.
+ *
+ * @param entryPos The position of the entry.
+ * @param cmprsdDataSize The compressed data size of the entry.
+ * @param uncmprsdDataSize The uncompressed data size of the entry.
+ * @param cmprsFlag The compression flag of the entry.
+ * @param typeCmprsData The type of compressed data.
+ * @param name The name of the entry.
+ */
+void PyInstArchive::addTOCEntry(uint32_t entryPos, uint32_t cmprsdDataSize, uint32_t uncmprsdDataSize, uint8_t cmprsFlag, char typeCmprsData, const std::string& name) {
+    tocList.emplace_back(
+        overlayPos + entryPos,
+        cmprsdDataSize,
+        uncmprsdDataSize,
+        cmprsFlag,
+        typeCmprsData,
+        name
+    );
+}
+
+/**
+ * @brief Get the size of the standard TOC entry fields.
+ *
+ * @return The size of the standard TOC entry fields.
+ */
+uint32_t PyInstArchive::sizeofEntry() const {
+    return sizeof(uint32_t) + sizeof(uint32_t) * 3 + sizeof(uint8_t) + sizeof(char);
 }
 
 /**
