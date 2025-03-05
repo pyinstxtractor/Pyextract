@@ -54,8 +54,18 @@ public:
     // Member functions
     bool open();
     void close();
+
     bool checkFile();
+    bool isFileValid(size_t searchChunkSize);
+    bool findCookie(size_t searchChunkSize);
+    void determinePyinstallerVersion();
+
     bool getCArchiveInfo();
+    void readArchiveData(uint32_t& lengthofPackage, uint32_t& toc, uint32_t& tocLen, uint32_t& pyver);
+    void calculateOverlayInfo(uint32_t lengthofPackage, uint32_t toc, uint32_t tocLen);
+    void debugOutput(uint32_t lengthofPackage);
+    void debugEntrySizes();
+
     void parseTOC();
     void timeExtractionProcess(const std::string& outputDir);
     void displayInfo();

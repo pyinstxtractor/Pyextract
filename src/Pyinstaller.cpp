@@ -79,29 +79,62 @@ const std::vector<CTOCEntry>& PyInstArchive::getTOCList() const {
 }
 
 /**
- * @brief Checks if the file is a valid PyInstaller archive.
+ * @brief Check if the file is a valid PyInstaller archive and determine its version.
  *
- * This method searches for the magic string (a unique identifier) in the PyInstaller archive
- * and determines the version of PyInstaller used. If the magic string is found, it sets the
- * cookie position and identifies the PyInstaller version.
+ * This function processes the file specified by filePath, verifies if it's a valid PyInstaller
+ * archive by searching for the magic string, and determines the PyInstaller version used to create the archive.
  *
- * @return true if the file is a valid PyInstaller archive, false otherwise.
+ * @return True if the file is valid and the version is determined, otherwise false.
  */
 bool PyInstArchive::checkFile() {
     std::cout << "[+] Processing " << filePath << std::endl;
     const size_t searchChunkSize = 8192;
-    uint64_t endPos = fileSize;
-    cookiePos = -1;
 
-    if (endPos < MAGIC.size()) {
-        std::cerr << "[!] Error: File is too short or truncated" << std::endl;
+    if (!isFileValid(searchChunkSize)) {
         return false;
     }
 
+    if (!findCookie(searchChunkSize)) {
+        return false;
+    }
+
+    determinePyinstallerVersion();
+    return true;
+}
+
+/**
+ * @brief Validate the file size to ensure it's large enough to contain the magic string.
+ *
+ * This function checks if the file size is smaller than the size of the magic string,
+ * which would indicate that the file is too short or truncated to be a valid PyInstaller archive.
+ *
+ * @param searchChunkSize The size of the chunk to be searched.
+ * @return True if the file size is valid, otherwise false.
+ */
+bool PyInstArchive::isFileValid(size_t searchChunkSize) {
+    if (fileSize < MAGIC.size()) {
+        std::cerr << "[!] Error: File is too short or truncated" << std::endl;
+        return false;
+    }
+    return true;
+}
+
+/**
+ * @brief Search for the magic string in the file to find the cookie position.
+ *
+ * This function reads through the file in chunks, searching for the magic string that indicates
+ * the start of the PyInstaller archive's metadata. It sets the cookie position if the magic string is found.
+ *
+ * @param searchChunkSize The size of the chunk to be searched.
+ * @return True if the cookie position is found, otherwise false.
+ */
+bool PyInstArchive::findCookie(size_t searchChunkSize) {
+    uint64_t endPos = fileSize;
+    cookiePos = -1;
     std::vector<char> buffer(searchChunkSize + MAGIC.size() - 1);
 
     while (endPos >= MAGIC.size()) {
-        uint64_t startPos = endPos >= searchChunkSize ? endPos - searchChunkSize : 0;
+        uint64_t startPos = (endPos >= searchChunkSize) ? endPos - searchChunkSize : 0;
         size_t chunkSize = endPos - startPos;
 
         fPtr.seekg(startPos, std::ios::beg);
@@ -114,12 +147,8 @@ bool PyInstArchive::checkFile() {
         for (size_t i = chunkSize; i-- > 0;) {
             if (std::memcmp(buffer.data() + i, MAGIC.c_str(), MAGIC.size()) == 0) {
                 cookiePos = startPos + i;
-                break;
+                return true;
             }
-        }
-
-        if (cookiePos != -1) {
-            break;
         }
 
         endPos = startPos + MAGIC.size() - 1;
@@ -128,25 +157,32 @@ bool PyInstArchive::checkFile() {
         }
     }
 
-    if (cookiePos == -1) {
-        std::cerr << "[!] Error: Missing cookie, unsupported pyinstaller version or not a pyinstaller archive" << std::endl;
-        return false;
-    }
+    std::cerr << "[!] Error: Missing cookie, unsupported pyinstaller version or not a pyinstaller archive" << std::endl;
+    return false;
+}
 
+/**
+ * @brief Determine the version of the PyInstaller used to create the archive.
+ *
+ * This function reads a specific section of the file and checks for the presence of the word "python".
+ * If found, it sets the PyInstaller version to 2.1 or higher; otherwise, it sets the version to 2.0.
+ */
+void PyInstArchive::determinePyinstallerVersion() {
     fPtr.seekg(cookiePos + PYINST20_COOKIE_SIZE, std::ios::beg);
     std::vector<char> buffer64(64);
     fPtr.read(buffer64.data(), 64);
-    if (std::string(buffer64.data(), 64).find("python") != std::string::npos) {
+    std::string bufferStr(buffer64.data(), buffer64.size());
+
+    if (bufferStr.find("python") != std::string::npos) {
         std::cout << "[+] Pyinstaller version: 2.1+" << std::endl;
         pyinstVer = 21;
     }
     else {
-        pyinstVer = 20;
         std::cout << "[+] Pyinstaller version: 2.0" << std::endl;
+        pyinstVer = 20;
     }
-
-    return true;
 }
+
 
 /**
  * @brief Swaps the byte order of a 32-bit integer to correct endianness.
@@ -218,61 +254,27 @@ size_t getPhysicalCoreCount() {
 }
 
 /**
- * @brief Extracts and parses CArchive information from the PyInstaller file.
+ * @brief Get information about the CArchive.
  *
- * This function reads the package length, table of contents (TOC), and Python version
- * from the PyInstaller archive. It adjusts byte order for multi-byte values based on
- * the endianness and calculates offsets for further extraction.
+ * This function reads the PyInstaller archive to extract metadata, such as the Python version,
+ * table of contents position, and sizes, and overlays size and position.
  *
- * @return true if the archive information was successfully parsed, false if an error occurred.
+ * @return True if the information is successfully extracted, otherwise false.
  */
 bool PyInstArchive::getCArchiveInfo() {
     try {
         uint32_t lengthofPackage, toc, tocLen, pyver;
-
-        // Check for version and load relevant data
-        fPtr.seekg(cookiePos, std::ios::beg);
-        char buffer[PYINST21_COOKIE_SIZE];  // Use a single buffer to handle both versions
-        fPtr.read(buffer, (pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE);
-
-        // Directly read values from the buffer
-        if (pyinstVer == 20 || pyinstVer == 21) {
-            // Read and immediately swap bytes
-            lengthofPackage = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 8));
-            toc = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 12));
-            tocLen = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 16));
-            pyver = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 20));
-        }
-
-        // Python version determination
-        pymaj = pyver / (pyver >= 100 ? 100 : 10);
-        pymin = pyver % (pyver >= 100 ? 100 : 10);
-
-        std::cout << "[+] Python version: " << static_cast<int>(pymaj) << "." << static_cast<int>(pymin) << std::endl;
-
-        uint64_t tailBytes = fileSize - cookiePos - ((pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE);
-        overlaySize = static_cast<uint64_t>(lengthofPackage) + tailBytes;
-        overlayPos = fileSize - overlaySize;
-        tableOfContentsPos = overlayPos + toc;
-        tableOfContentsSize = tocLen;
+        readArchiveData(lengthofPackage, toc, tocLen, pyver);
+        calculateOverlayInfo(lengthofPackage, toc, tocLen);
 
 #ifdef _DEBUG
-        std::cout << "[+] Length of package: " << lengthofPackage << " bytes" << std::endl;
-        std::cout << "[DEBUG] overlaySize: " << overlaySize << std::endl;
-        std::cout << "[DEBUG] overlayPos: " << overlayPos << std::endl;
-        std::cout << "[DEBUG] tableOfContentsPos: " << tableOfContentsPos << std::endl;
-        std::cout << "[DEBUG] tableOfContentsSize: " << tableOfContentsSize << std::endl;
+        debugOutput(lengthofPackage);
 #endif
 
         parseTOC();
 
 #ifdef _DEBUG
-        std::cout << "[DEBUG] Entry sizes in the CArchive:" << std::endl;
-        for (const auto& entry : tocList) {
-            std::cout << "[DEBUG] Entry Name: " << entry.getName()
-                << ", Compressed Size: " << entry.getCompressedDataSize() << " bytes"
-                << std::endl;
-        }
+        debugEntrySizes();
 #endif
 
     }
@@ -282,6 +284,82 @@ bool PyInstArchive::getCArchiveInfo() {
     }
     return true;
 }
+
+/**
+ * @brief Read the archive data and extract necessary values.
+ *
+ * This function reads the PyInstaller archive's cookie section to extract metadata,
+ * such as the length of the package, table of contents position and length, and Python version.
+ *
+ * @param lengthofPackage Reference to store the length of the package.
+ * @param toc Reference to store the position of the table of contents.
+ * @param tocLen Reference to store the length of the table of contents.
+ * @param pyver Reference to store the Python version.
+ */
+void PyInstArchive::readArchiveData(uint32_t& lengthofPackage, uint32_t& toc, uint32_t& tocLen, uint32_t& pyver) {
+    fPtr.seekg(cookiePos, std::ios::beg);
+    char buffer[PYINST21_COOKIE_SIZE];  // Use a single buffer to handle both versions
+    fPtr.read(buffer, (pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE);
+
+    if (pyinstVer == 20 || pyinstVer == 21) {
+        lengthofPackage = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 8));
+        toc = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 12));
+        tocLen = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 16));
+        pyver = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 20));
+    }
+}
+
+
+/**
+ * @brief Calculate the overlay size and position, and table of contents position and size.
+ *
+ * This function calculates the overlay size and position, and the table of contents position and size
+ * based on the extracted archive metadata.
+ *
+ * @param lengthofPackage The length of the package extracted from the archive.
+ * @param toc The position of the table of contents extracted from the archive.
+ * @param tocLen The length of the table of contents extracted from the archive.
+ */
+void PyInstArchive::calculateOverlayInfo(uint32_t lengthofPackage, uint32_t toc, uint32_t tocLen) {
+    uint64_t tailBytes = fileSize - cookiePos - ((pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE);
+    overlaySize = static_cast<uint64_t>(lengthofPackage) + tailBytes;
+    overlayPos = fileSize - overlaySize;
+    tableOfContentsPos = overlayPos + toc;
+    tableOfContentsSize = tocLen;
+}
+
+#ifdef _DEBUG
+/**
+ * @brief Output debug information about the archive.
+ *
+ * This function outputs debug information about the overlay size and position,
+ * and the table of contents position and size.
+ *
+ * @param lengthofPackage The length of the package extracted from the archive.
+ */
+void PyInstArchive::debugOutput(uint32_t lengthofPackage) {
+    std::cout << "[+] Length of package: " << lengthofPackage << " bytes" << std::endl;
+    std::cout << "[DEBUG] overlaySize: " << overlaySize << std::endl;
+    std::cout << "[DEBUG] overlayPos: " << overlayPos << std::endl;
+    std::cout << "[DEBUG] tableOfContentsPos: " << tableOfContentsPos << std::endl;
+    std::cout << "[DEBUG] tableOfContentsSize: " << tableOfContentsSize << std::endl;
+}
+
+/**
+ * @brief Output debug information about the entry sizes in the CArchive.
+ *
+ * This function outputs debug information about the entry sizes in the CArchive, including the
+ * name and compressed data size of each entry.
+ */
+void PyInstArchive::debugEntrySizes() {
+    std::cout << "[DEBUG] Entry sizes in the CArchive:" << std::endl;
+    for (const auto& entry : tocList) {
+        std::cout << "[DEBUG] Entry Name: " << entry.getName()
+            << ", Compressed Size: " << entry.getCompressedDataSize() << " bytes"
+            << std::endl;
+    }
+}
+#endif
 
 /**
  * @brief Parses the Table of Contents (TOC) from the PyInstaller archive.
