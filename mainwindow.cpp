@@ -1,7 +1,3 @@
-#include "mainwindow.h"
-#include "ui_mainwindow.h"
-#include "pyinstarchive.h"
-
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QThread>
@@ -9,6 +5,12 @@
 #include <QMutex>
 #include <QMimeData>
 #include <QDropEvent>
+#include <QDebug>
+
+#include "mainwindow.h"
+#include "extractionworker.h"
+#include "ui_mainwindow.h"
+#include "pyinstarchive.h"
 
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
@@ -16,6 +18,7 @@ MainWindow::MainWindow(QWidget *parent) :
 {
     ui->setupUi(this);
     setWindowTitle("PyInstaller Archive Viewer");
+
     ui->progressbar->setStyleSheet("QProgressBar {"
                                    "   height: 30px;"
                                    "   width: 300px;"
@@ -24,8 +27,9 @@ MainWindow::MainWindow(QWidget *parent) :
                                    "   text-align: center;"
                                    "}"
                                    "QProgressBar::chunk {"
-                                   "   background-color: #4caf50;"
+                                   "   background-color: #0078D4;"
                                    "}");
+
     ui->textbox->setAcceptDrops(true);
     ui->textbox->setDragEnabled(true);
     connect(ui->Openbutton, &QPushButton::clicked, this, &MainWindow::onSelectFileButtonClicked);
@@ -54,7 +58,6 @@ void MainWindow::dropEvent(QDropEvent *event)
             QString filePath = urlList.first().toLocalFile();
             ui->textbox->setText(filePath);
             processFile(filePath);
-
         }
     }
 }
@@ -96,7 +99,6 @@ void MainWindow::processFile(const QString &filePath)
     }
 
     qDebug() << "[+] Archive info extracted successfully!";
-
     archive.displayInfo(ui->listWidget);
 }
 
@@ -114,6 +116,26 @@ void MainWindow::onExtractButtonClicked()
         return;
     }
 
+    QString selectedFile;
+    QListWidgetItem *item = ui->listWidget->currentItem();
+    if (item) {
+        selectedFile = item->text();
+    }
+
+    workerThread = new QThread;
+    auto *worker = new ExtractionWorker(archivePath, outputDir, selectedFile);
+    worker->moveToThread(workerThread);
+
+    connect(workerThread, &QThread::started, worker, &ExtractionWorker::startExtraction);
+    connect(worker, &ExtractionWorker::progress, this, [=](int value) {
+        ui->progressbar->setValue(value);
+    });
+    connect(worker, &ExtractionWorker::finished, this, &MainWindow::onExtractionFinished);
+    connect(worker, &ExtractionWorker::errorOccurred, this, &MainWindow::onErrorOccurred);
+    connect(worker, &ExtractionWorker::finished, workerThread, &QThread::quit);
+
+    workerThread->start();
+    onExtractionStarted();
 }
 
 void MainWindow::onExtractionStarted()
@@ -121,11 +143,19 @@ void MainWindow::onExtractionStarted()
     ui->progressbar->setValue(0);
 }
 
-void MainWindow::onExtractionFinished()
+
+void MainWindow::onExtractionProgress(int progress)
 {
+    ui->progressbar->setValue(progress);
 }
 
-void MainWindow::onErrorOccurred(const QString &errorMessage)
+void MainWindow::onExtractionFinished()
+{
+    QMessageBox::information(this, "Success", "Extraction complete!");
+    ui->progressbar->setValue(100);
+}
+
+void MainWindow::onErrorOccurred(const QString& errorMessage)
 {
     QMessageBox::critical(this, "Error", errorMessage);
 }

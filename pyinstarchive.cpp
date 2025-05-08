@@ -1,8 +1,8 @@
-#include "pyinstarchive.h"
-#include "qtextbrowser.h"
+#include <QListWidget>
 #include <QtZlib/zlib.h>
 
-#include <QListWidget>
+#include "pyinstarchive.h"
+#include "qtextbrowser.h"
 
 const std::string PyInstArchive::MAGIC = "MEI\014\013\012\013\016";
 
@@ -308,6 +308,16 @@ void PyInstArchive::displayInfo(QListWidget* listWidget) {
         QString itemText = QString::fromStdString(entry.getName());
         listWidget->addItem(itemText);
     }
+}
+
+void PyInstArchive::timeExtractionProcess(const std::string& outputDir) {
+
+    auto start = std::chrono::high_resolution_clock::now();
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
+
+    std::cout << "[*] Extraction completed in " << elapsed.count() << " seconds.\n";
 }
 
 

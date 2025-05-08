@@ -9,11 +9,13 @@ CONFIG += c++17
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += \
+    extractionworker.cpp \
     main.cpp \
     mainwindow.cpp \
     pyinstarchive.cpp
 
 HEADERS += \
+    extractionworker.h \
     mainwindow.h \
     pyinstarchive.h
 

@@ -12,8 +12,8 @@ namespace Ui {
 class MainWindow;
 }
 
-
-
+// Forward declaration for the ExtractionWorker class
+class ExtractionWorker;
 
 class MainWindow : public QMainWindow
 {
@@ -29,14 +29,14 @@ public:
 private slots:
     void onSelectFileButtonClicked();
     void onExtractButtonClicked();
-    void onExtractionStarted();
     void onExtractionFinished();
     void onErrorOccurred(const QString &errorMessage);
+    void onExtractionProgress(int progress);
+    void onExtractionStarted();
 
 private:
     Ui::MainWindow *ui;
-
-    QThread *workerThread;
+    QThread *workerThread; // Thread for the extraction worker
 };
 
 #endif // MAINWINDOW_H
