@@ -2,6 +2,8 @@
 
 A C++ tool to inspect and extract contents from PyInstaller archives.
 
+> **Note:** For the GUI version of this tool, you can switch to the `PyInstaller-Archive-Viewer` branch of this repository.
+
 ## Features
 - Opens and reads PyInstaller archive files.
 - Detects PyInstaller version (2.0 or 2.1+).
