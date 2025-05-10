@@ -137,37 +137,7 @@ void MainWindow::processFile(const QString &filePath)
     qDebug() << "[+] Archive info extracted successfully!";
     archive.displayInfo(ui->listWidget);
 }
-/*
-void MainWindow::onExtractButtonClicked()
-{
-    ui->progressbar->show();
-    ui->progressbar->setValue(0);
 
-    if (taskbarProgress) {
-        taskbarProgress->setValue(0);
-        taskbarProgress->setVisible(true);
-    }
-
-    // Use a QTimer to gradually fill the progress bar
-    QTimer *timer = new QTimer(this);
-    connect(timer, &QTimer::timeout, this, [this, timer]() {
-        int value = ui->progressbar->value();
-        if (value < 100) {
-            value += 5; // Increase progress by 5%
-            ui->progressbar->setValue(value);
-            taskbarProgress->setValue(value);
-        } else {
-            timer->stop();
-            taskbarProgress->setValue(100);
-            taskbarProgress->setVisible(false);
-            QMessageBox::information(this, "Test", "Fake progress simulation complete!");
-        }
-    });
-
-    timer->start(100); // Update progress every 100ms
-}
-
-*/
 void MainWindow::onExtractButtonClicked()
 {
     QString archivePath = ui->textbox->text();
@@ -192,7 +162,6 @@ void MainWindow::onExtractButtonClicked()
     auto *worker = new ExtractionWorker(archivePath, outputDir, selectedFile);
     worker->moveToThread(workerThread);
 
-    // Ensure the progress bar is visible
     ui->progressbar->setValue(0);
     ui->progressbar->show();
 
