@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(PyInstallerViewer VERSION 1.0 LANGUAGES CXX)  # Ensure versioning is defined
+project(PyInstallerViewer VERSION 1.0 LANGUAGES CXX)
 
 add_subdirectory(PyExtract)
 add_subdirectory(qtwinextras-dev)
