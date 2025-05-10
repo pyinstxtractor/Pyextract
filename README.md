@@ -3,6 +3,7 @@
 A C++ tool to inspect and extract contents from PyInstaller archives.
 
 > **Note:** For the GUI version of this tool, you can switch to the `PyInstaller-Archive-Viewer` branch of this repository.
+>
 > **Note:** The macOS version is currently in beta.
 
 ## Features
