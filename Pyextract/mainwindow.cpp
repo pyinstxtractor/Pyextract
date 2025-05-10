@@ -7,6 +7,10 @@
 #include <QDropEvent>
 #include <QDebug>
 
+#include <QWinTaskbarButton.h>
+#include <QWinTaskbarProgress.h>
+#include <qtimer.h>
+
 #include "mainwindow.h"
 #include "extractionworker.h"
 #include "ui_mainwindow.h"
@@ -18,6 +22,13 @@ MainWindow::MainWindow(QWidget *parent) :
 {
     ui->setupUi(this);
     setWindowTitle("PyInstaller Archive Viewer");
+
+    taskbarButton = new QWinTaskbarButton(this);
+    taskbarButton->setWindow(windowHandle());
+
+    taskbarProgress = taskbarButton->progress();
+    taskbarProgress->setRange(0, 100);
+    taskbarProgress->setVisible(true);
 
     ui->progressbar->setStyleSheet("QProgressBar {"
                                    "   height: 30px;"
@@ -42,6 +53,20 @@ MainWindow::~MainWindow()
     workerThread->wait();
     delete ui;
 }
+
+void MainWindow::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+
+    // Initialize taskbar button and progress
+    taskbarButton = new QWinTaskbarButton(this);
+    taskbarButton->setWindow(this->windowHandle());
+
+    taskbarProgress = taskbarButton->progress();
+    taskbarProgress->setMinimum(0);
+    taskbarProgress->setMaximum(100);
+}
+
 
 void MainWindow::dragEnterEvent(QDragEnterEvent *event)
 {
@@ -112,7 +137,37 @@ void MainWindow::processFile(const QString &filePath)
     qDebug() << "[+] Archive info extracted successfully!";
     archive.displayInfo(ui->listWidget);
 }
+/*
+void MainWindow::onExtractButtonClicked()
+{
+    ui->progressbar->show();
+    ui->progressbar->setValue(0);
 
+    if (taskbarProgress) {
+        taskbarProgress->setValue(0);
+        taskbarProgress->setVisible(true);
+    }
+
+    // Use a QTimer to gradually fill the progress bar
+    QTimer *timer = new QTimer(this);
+    connect(timer, &QTimer::timeout, this, [this, timer]() {
+        int value = ui->progressbar->value();
+        if (value < 100) {
+            value += 5; // Increase progress by 5%
+            ui->progressbar->setValue(value);
+            taskbarProgress->setValue(value);
+        } else {
+            timer->stop();
+            taskbarProgress->setValue(100);
+            taskbarProgress->setVisible(false);
+            QMessageBox::information(this, "Test", "Fake progress simulation complete!");
+        }
+    });
+
+    timer->start(100); // Update progress every 100ms
+}
+
+*/
 void MainWindow::onExtractButtonClicked()
 {
     QString archivePath = ui->textbox->text();
@@ -137,10 +192,25 @@ void MainWindow::onExtractButtonClicked()
     auto *worker = new ExtractionWorker(archivePath, outputDir, selectedFile);
     worker->moveToThread(workerThread);
 
+    // Ensure the progress bar is visible
+    ui->progressbar->setValue(0);
+    ui->progressbar->show();
+
+    if (taskbarProgress) {
+        taskbarProgress->setValue(0);
+        taskbarProgress->setVisible(true);
+    }
+
     connect(workerThread, &QThread::started, worker, &ExtractionWorker::startExtraction);
+
     connect(worker, &ExtractionWorker::progress, this, [=](int value) {
         ui->progressbar->setValue(value);
+
+        if (taskbarProgress) {
+            taskbarProgress->setValue(value);
+        }
     });
+
     connect(worker, &ExtractionWorker::finished, this, &MainWindow::onExtractionFinished);
     connect(worker, &ExtractionWorker::errorOccurred, this, &MainWindow::onErrorOccurred);
     connect(worker, &ExtractionWorker::finished, workerThread, &QThread::quit);
@@ -158,13 +228,24 @@ void MainWindow::onExtractionStarted()
 void MainWindow::onExtractionProgress(int progress)
 {
     ui->progressbar->setValue(progress);
+
+    if (taskbarProgress) {
+        taskbarProgress->setValue(progress);
+    }
 }
+
 
 void MainWindow::onExtractionFinished()
 {
     QMessageBox::information(this, "Success", "Extraction complete!");
     ui->progressbar->setValue(100);
+
+    if (taskbarProgress) {
+        taskbarProgress->setValue(100);
+        taskbarProgress->hide(); // Optionally hide once done
+    }
 }
+
 
 void MainWindow::onErrorOccurred(const QString& errorMessage)
 {
