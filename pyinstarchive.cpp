@@ -1,8 +1,10 @@
 #include <QListWidget>
-#include <QtZlib/zlib.h>
-
+#ifdef Q_OS_WIN
+#include <Qtzlib/zlib.h>
+#elif defined(Q_OS_MAC)
+#include <zlib.h>
+#endif
 #include "pyinstarchive.h"
-#include "qtextbrowser.h"
 
 const std::string PyInstArchive::MAGIC = "MEI\014\013\012\013\016";
 

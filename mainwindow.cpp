@@ -64,12 +64,23 @@ void MainWindow::dropEvent(QDropEvent *event)
 
 void MainWindow::onSelectFileButtonClicked()
 {
-    QString filePath = QFileDialog::getOpenFileName(this, "Open Archive File", "", "PyInstaller Archives (*.exe)");
+    QString fileFilter;
+
+#ifdef Q_OS_WIN
+    fileFilter = "All Files (*.*)";
+#elif defined(Q_OS_MAC)
+    fileFilter = "All Files (*)";  // macOS: no extension, allow all
+#else
+    fileFilter = "All Files (*)";  // fallback
+#endif
+
+    QString filePath = QFileDialog::getOpenFileName(this, "Open Archive File", "", fileFilter);
     if (!filePath.isEmpty()) {
         ui->textbox->setText(filePath);
         processFile(filePath);
     }
 }
+
 
 void MainWindow::processFile(const QString &filePath)
 {
