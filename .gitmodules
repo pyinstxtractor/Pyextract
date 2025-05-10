@@ -1,0 +1,3 @@
+[submodule "qtwinextras-dev"]
+	path = qtwinextras-dev
+	url = https://github.com/BLumia/qtwinextras.git
