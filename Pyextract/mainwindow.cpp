@@ -67,7 +67,6 @@ void MainWindow::showEvent(QShowEvent *event)
     taskbarProgress->setMaximum(100);
 }
 
-
 void MainWindow::dragEnterEvent(QDragEnterEvent *event)
 {
     if (event->mimeData()->hasUrls()) {
@@ -105,7 +104,6 @@ void MainWindow::onSelectFileButtonClicked()
         processFile(filePath);
     }
 }
-
 
 void MainWindow::processFile(const QString &filePath)
 {
@@ -193,7 +191,6 @@ void MainWindow::onExtractionStarted()
     ui->progressbar->setValue(0);
 }
 
-
 void MainWindow::onExtractionProgress(int progress)
 {
     ui->progressbar->setValue(progress);
@@ -203,7 +200,6 @@ void MainWindow::onExtractionProgress(int progress)
     }
 }
 
-
 void MainWindow::onExtractionFinished()
 {
     QMessageBox::information(this, "Success", "Extraction complete!");
@@ -211,10 +207,9 @@ void MainWindow::onExtractionFinished()
 
     if (taskbarProgress) {
         taskbarProgress->setValue(100);
-        taskbarProgress->hide(); // Optionally hide once done
+        taskbarProgress->hide(); // hide once done
     }
 }
-
 
 void MainWindow::onErrorOccurred(const QString& errorMessage)
 {

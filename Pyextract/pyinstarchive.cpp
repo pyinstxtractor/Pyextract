@@ -1,9 +1,13 @@
 #include <QListWidget>
+#include <filesystem>
+#include <QDebug>
+
 #ifdef Q_OS_WIN
 #include <Qtzlib/zlib.h>
 #elif defined(Q_OS_MAC)
 #include <zlib.h>
 #endif
+
 #include "pyinstarchive.h"
 
 const std::string PyInstArchive::MAGIC = "MEI\014\013\012\013\016";
@@ -13,9 +17,6 @@ PyInstArchive::PyInstArchive(const std::string& path) : filePath(path), fileSize
 const std::vector<CTOCEntry>& PyInstArchive::getTOCList() const {
     return tocList;
 }
-
-
-#include <QDebug>
 
 bool PyInstArchive::checkFile() {
     qDebug() << "[+] Processing" << QString::fromStdString(filePath);
@@ -43,7 +44,7 @@ bool PyInstArchive::checkFile() {
 bool PyInstArchive::open() {
     fPtr.open(filePath, std::ios::binary);
     if (!fPtr.is_open()) {
-        std::cerr << "[!] Error: Could not open " << filePath << std::endl;
+        qDebug() << "[!] Error: Could not open " << filePath;
         return false;
     }
     fPtr.seekg(0, std::ios::end);
@@ -94,10 +95,9 @@ bool PyInstArchive::findCookie(size_t searchChunkSize) {
         }
     }
 
-    std::cerr << "[!] Error: Missing cookie, unsupported pyinstaller version or not a pyinstaller archive" << std::endl;
+    qDebug() << "[!] Error: Missing cookie, unsupported pyinstaller version or not a pyinstaller archive";
     return false;
 }
-
 
 uint32_t swapBytes(uint32_t value) {
     return ((value >> 24) & 0x000000FF) |
@@ -105,8 +105,6 @@ uint32_t swapBytes(uint32_t value) {
            ((value << 8) & 0x00FF0000) |
            ((value << 24) & 0xFF000000);
 }
-
-
 
 void PyInstArchive::determinePyinstallerVersion() {
     fPtr.seekg(cookiePos + PYINST20_COOKIE_SIZE, std::ios::beg);
@@ -133,12 +131,11 @@ bool PyInstArchive::getCArchiveInfo() {
 
     }
     catch (...) {
-        std::cerr << "[!] Error: The file is not a PyInstaller archive" ;
+        qDebug() << "[!] Error: The file is not a PyInstaller archive" ;
         return false;
     }
     return true;
 }
-
 
 void PyInstArchive::readArchiveData(uint32_t& lengthofPackage, uint32_t& toc, uint32_t& tocLen, uint32_t& pyver) {
     fPtr.seekg(cookiePos, std::ios::beg);
@@ -152,8 +149,6 @@ void PyInstArchive::readArchiveData(uint32_t& lengthofPackage, uint32_t& toc, ui
         pyver = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 20));
     }
 }
-
-
 
 void PyInstArchive::calculateOverlayInfo(uint32_t lengthofPackage, uint32_t toc, uint32_t tocLen) {
     uint64_t tailBytes = fileSize - cookiePos - ((pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE);
@@ -188,7 +183,6 @@ void PyInstArchive::parseTOC() {
     qDebug() << "[+] Found " << tocList.size() << " files in CArchive" ;
 }
 
-
 bool PyInstArchive::readEntrySize(uint32_t& entrySize) {
     fPtr.read(reinterpret_cast<char*>(&entrySize), sizeof(entrySize));
     if (fPtr.gcount() < sizeof(entrySize)) return false;
@@ -196,7 +190,6 @@ bool PyInstArchive::readEntrySize(uint32_t& entrySize) {
     entrySize = swapBytes(entrySize);
     return true;
 }
-
 
 void PyInstArchive::readEntryFields(uint32_t& entryPos, uint32_t& cmprsdDataSize, uint32_t& uncmprsdDataSize, uint8_t& cmprsFlag, char& typeCmprsData, std::vector<char>& nameBuffer, uint32_t entrySize) {
     uint32_t nameLen = sizeofEntry();
@@ -213,7 +206,6 @@ void PyInstArchive::readEntryFields(uint32_t& entryPos, uint32_t& cmprsdDataSize
     fPtr.read(nameBuffer.data(), entrySize - nameLen);
 }
 
-
 std::string PyInstArchive::decodeEntryName(std::vector<char>& nameBuffer, uint32_t parsedLen) {
     std::string name(nameBuffer.data(), nameBuffer.size());
     name.erase(std::remove(name.begin(), name.end(), '\0'), name.end());
@@ -224,7 +216,6 @@ std::string PyInstArchive::decodeEntryName(std::vector<char>& nameBuffer, uint32
 
     return name;
 }
-
 
 void PyInstArchive::addTOCEntry(uint32_t entryPos, uint32_t cmprsdDataSize, uint32_t uncmprsdDataSize, uint8_t cmprsFlag, char typeCmprsData, const std::string& name) {
     tocList.emplace_back(
@@ -237,11 +228,9 @@ void PyInstArchive::addTOCEntry(uint32_t entryPos, uint32_t cmprsdDataSize, uint
         );
 }
 
-
 uint32_t PyInstArchive::sizeofEntry() const {
     return sizeof(uint32_t) + sizeof(uint32_t) * 3 + sizeof(uint8_t) + sizeof(char);
 }
-
 
 void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const std::string& outputDir, std::mutex& mtx, std::mutex& printMtx) {
     std::vector<char> compressedData;
@@ -265,7 +254,7 @@ void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const st
 
         if (inflateInit(&strm) != Z_OK) {
             std::lock_guard<std::mutex> lock(printMtx);
-            std::cerr << "[!] Error: Could not initialize zlib for decompression\n";
+            qDebug() << "[!] Error: Could not initialize zlib for decompression\n";
             return;
         }
 
@@ -274,7 +263,7 @@ void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const st
 
         if (result != Z_STREAM_END) {
             std::lock_guard<std::mutex> lock(printMtx);
-            std::cerr << "[!] Error: Decompression failed for " << tocEntry.getName() << "\n";
+            qDebug() << "[!] Error: Decompression failed for " << tocEntry.getName() << "\n";
             return;
         }
     }
@@ -290,7 +279,7 @@ void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const st
         std::ofstream outFile(outputFilePath, std::ios::binary);
         if (!outFile.is_open()) {
             std::lock_guard<std::mutex> lock(printMtx);
-            std::cerr << "[!] Error: Could not open output file " << outputFilePath << "\n";
+            qDebug() << "[!] Error: Could not open output file " << QString::fromStdString(outputFilePath.string());
             return;
         }
         outFile.write(decompressedData.data(), decompressedData.size());
@@ -319,7 +308,5 @@ void PyInstArchive::timeExtractionProcess(const std::string& outputDir) {
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end - start;
 
-    std::cout << "[*] Extraction completed in " << elapsed.count() << " seconds.\n";
+    qDebug() << "[*] Extraction completed in" << elapsed.count() << "seconds.";
 }
-
-

@@ -1,22 +1,13 @@
 #ifndef PYINSTARCHIVE_H
 #define PYINSTARCHIVE_H
 
-#include "qdebug.h"
 #include "qlistwidget.h"
-#include "qlogging.h"
-#include "qtextbrowser.h"
-#include <iostream>
 #include <fstream>
 #include <vector>
 #include <string>
 #include <cstring>
 #include <cstdint>
 #include <mutex>
-#include <thread>
-#include <functional>
-#include <condition_variable>
-#include <queue>
-#include <filesystem>
 
 
 
