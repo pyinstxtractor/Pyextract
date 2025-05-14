@@ -19,7 +19,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(QT NAMES Qt6 REQUIRED COMPONENTS Widgets WinExtras)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets WinExtras)
 
-# Use dynamically resolved path for WinExtras includes (No `add_subdirectory()`)
 get_filename_component(ACTUAL_INCLUDE_DIR "${QTWINEXTRAS_PATH}/src/winextras" ABSOLUTE)
 message(STATUS "Resolved Include Directory: ${ACTUAL_INCLUDE_DIR}")
 
