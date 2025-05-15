@@ -1,7 +1,6 @@
 #include <QDebug>
 
 #include "extractionworker.h"
-#include "extractionworker.h"
 #include "pyinstarchive.h"
 
 ExtractionWorker::ExtractionWorker(const QString &archivePath, const QString &outputDir, const QString &selectedFile, QObject *parent)

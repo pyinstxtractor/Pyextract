@@ -1,19 +1,24 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#ifdef Q_OS_WIN
 #include "QWinTaskbarButton.h"
+#endif
+
 #include <QMainWindow>
 #include <QThread>
 #include <QPushButton>
 #include <QProgressBar>
 #include <QLabel>
 #include <QLineEdit>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QShowEvent>
 
 namespace Ui {
 class MainWindow;
 }
 
-// Forward declaration for the ExtractionWorker class
 class ExtractionWorker;
 
 class MainWindow : public QMainWindow
@@ -23,8 +28,6 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
-    void dragEnterEvent(QDragEnterEvent *event);
-    void dropEvent(QDropEvent *event);
     void processFile(const QString &filePath);
 
 private slots:
@@ -36,12 +39,19 @@ private slots:
     void onExtractionStarted();
 
 private:
-    QWinTaskbarButton *taskbarButton;
-    QWinTaskbarProgress *taskbarProgress;
+#ifdef _WIN32
+    QWinTaskbarButton* taskbarButton;
+    QWinTaskbarProgress* taskbarProgress;
+#endif
     Ui::MainWindow *ui;
-    QThread *workerThread; // Thread for the extraction worker
+    QThread *workerThread;
+
 protected:
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
+    #ifdef _WIN32
     void showEvent(QShowEvent *event) override;
+    #endif
 };
 
 #endif // MAINWINDOW_H
