@@ -1,6 +1,6 @@
 #include "../include/ThreadPool.h"
 
-/**
+/*
  * @brief Constructs a ThreadPool with a specified number of worker threads.
  *
  * This constructor initializes the thread pool by creating a specified number of
@@ -43,7 +43,7 @@ ThreadPool::ThreadPool(size_t numThreads) : stop(false) {
     }
 }
 
-/**
+/*
  * @brief Destructs the ThreadPool and joins all worker threads.
  *
  * This destructor signals all worker threads to stop processing tasks
@@ -70,7 +70,7 @@ ThreadPool::~ThreadPool() {
         worker.join();
 }
 
-/**
+/*
  * @brief Enqueues a new task into the ThreadPool for execution.
  *
  * This method adds a new task to the task queue and notifies one of the
