@@ -1,6 +1,7 @@
 #include <QListWidget>
 #include <filesystem>
 #include <QDebug>
+#include <iostream>
 
 #ifdef Q_OS_WIN
 #include <Qtzlib/zlib.h>
@@ -68,8 +69,7 @@ bool PyInstArchive::isFileValid(size_t searchChunkSize) {
 bool PyInstArchive::findCookie(size_t searchChunkSize) {
     uint64_t endPos = fileSize;
     cookiePos = -1;
-
-    QByteArray buffer(searchChunkSize + MAGIC.size() - 1, '\0');
+    std::vector<char> buffer(searchChunkSize + MAGIC.size() - 1);
 
     while (endPos >= MAGIC.size()) {
         uint64_t startPos = (endPos >= searchChunkSize) ? endPos - searchChunkSize : 0;
@@ -95,7 +95,7 @@ bool PyInstArchive::findCookie(size_t searchChunkSize) {
         }
     }
 
-    qDebug() << "[!] Error: Missing cookie, unsupported pyinstaller version or not a pyinstaller archive";
+    std::cerr << "[!] Error: Missing cookie, unsupported pyinstaller version or not a pyinstaller archive" << std::endl;
     return false;
 }
 
@@ -139,7 +139,7 @@ bool PyInstArchive::getCArchiveInfo() {
 
 void PyInstArchive::readArchiveData(uint32_t& lengthofPackage, uint32_t& toc, uint32_t& tocLen, uint32_t& pyver) {
     fPtr.seekg(cookiePos, std::ios::beg);
-    char buffer[PYINST21_COOKIE_SIZE];
+    char buffer[PYINST21_COOKIE_SIZE];  // Use a single buffer to handle both versions
     fPtr.read(buffer, (pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE);
 
     if (pyinstVer == 20 || pyinstVer == 21) {
@@ -183,7 +183,6 @@ void PyInstArchive::parseTOC() {
     qDebug() << "[+] Found " << tocList.size() << " files in CArchive" ;
 }
 
-
 bool PyInstArchive::readEntrySize(uint32_t& entrySize) {
     fPtr.read(reinterpret_cast<char*>(&entrySize), sizeof(entrySize));
     if (fPtr.gcount() < sizeof(entrySize)) return false;
@@ -191,8 +190,6 @@ bool PyInstArchive::readEntrySize(uint32_t& entrySize) {
     entrySize = swapBytes(entrySize);
     return true;
 }
-
-
 
 void PyInstArchive::readEntryFields(uint32_t& entryPos, uint32_t& cmprsdDataSize, uint32_t& uncmprsdDataSize, uint8_t& cmprsFlag, char& typeCmprsData, std::vector<char>& nameBuffer, uint32_t entrySize) {
     uint32_t nameLen = sizeofEntry();
@@ -209,9 +206,6 @@ void PyInstArchive::readEntryFields(uint32_t& entryPos, uint32_t& cmprsdDataSize
     fPtr.read(nameBuffer.data(), entrySize - nameLen);
 }
 
-
-
-
 std::string PyInstArchive::decodeEntryName(std::vector<char>& nameBuffer, uint32_t parsedLen) {
     std::string name(nameBuffer.data(), nameBuffer.size());
     name.erase(std::remove(name.begin(), name.end(), '\0'), name.end());
@@ -223,8 +217,10 @@ std::string PyInstArchive::decodeEntryName(std::vector<char>& nameBuffer, uint32
     return name;
 }
 
-
-void PyInstArchive::addTOCEntry(uint32_t entryPos, uint32_t cmprsdDataSize, uint32_t uncmprsdDataSize, uint8_t cmprsFlag, char typeCmprsData, const std::string& name) {
+void PyInstArchive::addTOCEntry(uint32_t entryPos, uint32_t cmprsdDataSize, uint32_t uncmprsdDataSize, uint8_t cmprsFlag, char typeCmprsData, std::string name) {
+    if ((typeCmprsData == 's' || typeCmprsData == 'm') && name.find('.') == std::string::npos) {
+        name += ".pyc";
+    }
     tocList.emplace_back(
         overlayPos + entryPos,
         cmprsdDataSize,
@@ -242,6 +238,7 @@ uint32_t PyInstArchive::sizeofEntry() const {
 void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const std::string& outputDir, std::mutex& mtx, std::mutex& printMtx) {
     std::vector<char> compressedData;
 
+    // Read Compressed Data with File Lock
     {
         std::lock_guard<std::mutex> lock(mtx);
         fPtr.seekg(tocEntry.position, std::ios::beg);
@@ -249,6 +246,7 @@ void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const st
         fPtr.read(compressedData.data(), tocEntry.getCompressedDataSize());
     }
 
+    // Decompress Data
     std::vector<char> decompressedData;
     if (tocEntry.isCompressed()) {
         decompressedData.resize(tocEntry.uncmprsdDataSize);
@@ -261,7 +259,7 @@ void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const st
 
         if (inflateInit(&strm) != Z_OK) {
             std::lock_guard<std::mutex> lock(printMtx);
-            qDebug() << "[!] Error: Could not initialize zlib for decompression\n";
+            std::cerr << "[!] Error: Could not initialize zlib for decompression\n";
             return;
         }
 
@@ -270,7 +268,7 @@ void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const st
 
         if (result != Z_STREAM_END) {
             std::lock_guard<std::mutex> lock(printMtx);
-            qDebug() << "[!] Error: Decompression failed for " << tocEntry.getName() << "\n";
+            std::cerr << "[!] Error: Decompression failed for " << tocEntry.getName() << "\n";
             return;
         }
     }
@@ -286,22 +284,22 @@ void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const st
         std::ofstream outFile(outputFilePath, std::ios::binary);
         if (!outFile.is_open()) {
             std::lock_guard<std::mutex> lock(printMtx);
-            qDebug() << "[!] Error: Could not open output file " << QString::fromStdString(outputFilePath.string());
+            std::cerr << "[!] Error: Could not open output file " << outputFilePath << "\n";
             return;
         }
         outFile.write(decompressedData.data(), decompressedData.size());
     }
 
+    // Log Extraction Success
     {
         std::lock_guard<std::mutex> lock(printMtx);
-        qDebug() << "[+] Extracted: " << tocEntry.getName() << " (" << decompressedData.size() << " bytes)\n";
+        std::cout << "[+] Extracted: " << tocEntry.getName() << " (" << decompressedData.size() << " bytes)\n";
     }
 }
 
 void PyInstArchive::displayInfo(QListWidget* listWidget) {
     if (!listWidget) return;
     listWidget->clear();
-
     for (const auto& entry : tocList) {
         QString itemText = QString::fromStdString(entry.getName());
         listWidget->addItem(itemText);
