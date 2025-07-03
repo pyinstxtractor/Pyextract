@@ -158,177 +158,71 @@ void PyInstArchive::calculateOverlayInfo(uint32_t lengthofPackage, uint32_t toc,
     tableOfContentsSize = tocLen;
 }
 
-bool PyInstArchive::parseTOC() {
-    uint32_t parsedLen = 0;
-    qDebug() << "[DEBUG] Starting TOC parsing. tableOfContentsSize=" << tableOfContentsSize;
-
-    // Seek to the TOC start
+void PyInstArchive::parseTOC() {
     fPtr.seekg(tableOfContentsPos, std::ios::beg);
-    if (fPtr.fail()) {
-        qDebug() << "[DEBUG] Failed to seek to TOC start at position=" << tableOfContentsPos;
-        return false;
-    }
-    qDebug() << "[DEBUG] File pointer positioned at TOC start: " << fPtr.tellg();
+    tocList.clear();
+    uint32_t parsedLen = 0;
 
     while (parsedLen < tableOfContentsSize) {
-        qDebug() << "[DEBUG] Parsing TOC entry at parsedLen=" << parsedLen << ", current file position=" << fPtr.tellg();
-
         uint32_t entrySize;
-        if (!readEntrySize(entrySize)) {
-            qDebug() << "[DEBUG] Failed to read entrySize. Stopping TOC parsing.";
-            break;
-        }
-
-        if (entrySize < sizeofEntry() || entrySize > 1024) { // Arbitrary max name length
-            qDebug() << "[DEBUG] Invalid entrySize=" << entrySize << ". Skipping entry.";
-            parsedLen += sizeof(entrySize); // Move past the invalid entrySize
-            fPtr.seekg(parsedLen + tableOfContentsPos, std::ios::beg); // Reposition file pointer
-            if (fPtr.fail()) {
-                qDebug() << "[DEBUG] Failed to seek after invalid entrySize. Stopping TOC parsing.";
-                break;
-            }
-            continue; // Skip to next entry
-        }
+        if (!readEntrySize(entrySize)) break;
 
         std::vector<char> nameBuffer(entrySize - sizeofEntry());
         uint32_t entryPos, cmprsdDataSize, uncmprsdDataSize;
         uint8_t cmprsFlag;
         char typeCmprsData;
 
-        if (!readEntryFields(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, nameBuffer, entrySize)) {
-            qDebug() << "[DEBUG] Failed to read entry fields. Skipping entry.";
-            parsedLen += entrySize;
-            fPtr.seekg(parsedLen + tableOfContentsPos, std::ios::beg); // Reposition file pointer
-            if (fPtr.fail()) {
-                qDebug() << "[DEBUG] Failed to seek after failed entry fields. Stopping TOC parsing.";
-                break;
-            }
-            continue; // Skip to next entry
-        }
+        readEntryFields(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, nameBuffer, entrySize);
 
-        // Initialize CTOCEntry with constructor
-        CTOCEntry entry(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, decodeEntryName(nameBuffer, parsedLen));
-        tocList.emplace_back(entry);
+        std::string name = decodeEntryName(nameBuffer, parsedLen);
+        addTOCEntry(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, name);
 
         parsedLen += entrySize;
-        qDebug() << "[DEBUG] Added TOC entry. New parsedLen=" << parsedLen << ", entrySize=" << entrySize;
     }
 
-    qDebug() << "[DEBUG] TOC parsing complete. Found " << tocList.size() << " entries.";
-    return !tocList.empty();
+    qDebug() << "[+] Found " << tocList.size() << " files in CArchive" ;
 }
 
-bool needsByteSwap = true; // Set to false for macOS archives manually or with detection logic
 
 bool PyInstArchive::readEntrySize(uint32_t& entrySize) {
-    qDebug() << "[DEBUG] readEntrySize: Current file position=" << fPtr.tellg();
+    fPtr.read(reinterpret_cast<char*>(&entrySize), sizeof(entrySize));
+    if (fPtr.gcount() < sizeof(entrySize)) return false;
 
-    char buffer[sizeof(entrySize)];
-    fPtr.read(buffer, sizeof(entrySize));
-    if (fPtr.gcount() < sizeof(entrySize)) {
-        qDebug() << "[DEBUG] readEntrySize: Failed to read 4 bytes for entrySize. gcount=" << fPtr.gcount();
-        return false;
-    }
-
-    // Log raw bytes
-    QString hexDump;
-    for (size_t i = 0; i < sizeof(entrySize); ++i) {
-        hexDump += QString("%1 ").arg(static_cast<unsigned char>(buffer[i]), 2, 16, QChar('0'));
-    }
-    qDebug() << "[DEBUG] readEntrySize: Raw entrySize bytes=" << hexDump;
-
-    // Copy bytes to entrySize
-    memcpy(&entrySize, buffer, sizeof(entrySize));
     entrySize = swapBytes(entrySize);
-    qDebug() << "[DEBUG] readEntrySize: Swapped entrySize=" << entrySize;
     return true;
 }
 
 
 
-bool PyInstArchive::readEntryFields(uint32_t& entryPos, uint32_t& cmprsdDataSize, uint32_t& uncmprsdDataSize, uint8_t& cmprsFlag, char& typeCmprsData, std::vector<char>& nameBuffer, uint32_t entrySize) {
-    uint32_t nameLen = sizeofEntry(); // 18 bytes: 4 + 4*3 + 1 + 1
-    qDebug() << "[DEBUG] readEntryFields: entrySize=" << entrySize << ", nameLen=" << (entrySize - nameLen);
-
+void PyInstArchive::readEntryFields(uint32_t& entryPos, uint32_t& cmprsdDataSize, uint32_t& uncmprsdDataSize, uint8_t& cmprsFlag, char& typeCmprsData, std::vector<char>& nameBuffer, uint32_t entrySize) {
+    uint32_t nameLen = sizeofEntry();
     fPtr.read(reinterpret_cast<char*>(&entryPos), sizeof(entryPos));
     fPtr.read(reinterpret_cast<char*>(&cmprsdDataSize), sizeof(cmprsdDataSize));
     fPtr.read(reinterpret_cast<char*>(&uncmprsdDataSize), sizeof(uncmprsdDataSize));
     fPtr.read(reinterpret_cast<char*>(&cmprsFlag), sizeof(cmprsFlag));
     fPtr.read(reinterpret_cast<char*>(&typeCmprsData), sizeof(typeCmprsData));
 
-    if (fPtr.gcount() < (sizeof(entryPos) + sizeof(cmprsdDataSize) + sizeof(uncmprsdDataSize) + sizeof(cmprsFlag) + sizeof(typeCmprsData))) {
-        qDebug() << "[DEBUG] readEntryFields: Failed to read fixed fields. gcount=" << fPtr.gcount();
-        return false;
-    }
-
     entryPos = swapBytes(entryPos);
     cmprsdDataSize = swapBytes(cmprsdDataSize);
     uncmprsdDataSize = swapBytes(uncmprsdDataSize);
 
     fPtr.read(nameBuffer.data(), entrySize - nameLen);
-    if (fPtr.gcount() < static_cast<std::streamsize>(entrySize - nameLen)) {
-        qDebug() << "[DEBUG] readEntryFields: Failed to read nameBuffer. Expected=" << (entrySize - nameLen) << ", gcount=" << fPtr.gcount();
-        return false;
-    }
-
-    QString hexDump;
-    for (char c : nameBuffer) {
-        hexDump += QString("%1 ").arg(static_cast<unsigned char>(c), 2, 16, QChar('0'));
-    }
-    qDebug() << "[DEBUG] readEntryFields: nameBuffer hex=" << hexDump;
-    return true;
 }
 
 
 
 
 std::string PyInstArchive::decodeEntryName(std::vector<char>& nameBuffer, uint32_t parsedLen) {
-    size_t nullPos = 0;
-    for (size_t i = 0; i < nameBuffer.size(); ++i) {
-        if (nameBuffer[i] == '\0') {
-            nullPos = i;
-            break;
-        }
-    }
-    if (nullPos == 0) nullPos = nameBuffer.size();
+    std::string name(nameBuffer.data(), nameBuffer.size());
+    name.erase(std::remove(name.begin(), name.end(), '\0'), name.end());
 
-    QString hexDump;
-    for (size_t i = 0; i < nullPos; ++i) {
-        hexDump += QString("%1 ").arg(static_cast<unsigned char>(nameBuffer[i]), 2, 16, QChar('0'));
-    }
-    qDebug() << "[DEBUG] Raw nameBuffer (hex, up to null):" << hexDump;
-
-    QString name = QString::fromUtf8(nameBuffer.data(), nullPos);
-    if (name.contains(QChar(0xFFFD))) {
-        qDebug() << "[DEBUG] Invalid UTF-8, falling back to Latin-1 (Windows-1252 approximation)";
-        name = QString::fromLatin1(nameBuffer.data(), nullPos);
-    } else {
-        qDebug() << "[DEBUG] UTF-8 decoding successful";
+    if (name.empty() || name[0] == '/') {
+        name = "unnamed_" + std::to_string(parsedLen);
     }
 
-    name = name.trimmed().replace(QChar(0), "");
-
-    bool isValid = true;
-    if (name.isEmpty() || name.startsWith('/')) {
-        isValid = false;
-    } else {
-        for (QChar c : name) {
-            if (c.unicode() < 32 || c == QChar(':') || c == QChar('\\') || c == QChar('*') ||
-                c == QChar('?') || c == QChar('"') || c == QChar('<') || c == QChar('>') || c == QChar('|')) {
-                isValid = false;
-                break;
-            }
-        }
-    }
-
-    if (!isValid) {
-        qDebug() << "[DEBUG] Using fallback name for invalid or non-printable name:" << name;
-        name = QString("unnamed_%1").arg(parsedLen);
-    }
-
-    qDebug() << "[DEBUG] Decoded name:" << name;
-    return name.toStdString();
+    return name;
 }
+
 
 void PyInstArchive::addTOCEntry(uint32_t entryPos, uint32_t cmprsdDataSize, uint32_t uncmprsdDataSize, uint8_t cmprsFlag, char typeCmprsData, const std::string& name) {
     tocList.emplace_back(

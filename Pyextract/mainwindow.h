@@ -1,9 +1,6 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
-#ifdef Q_OS_WIN
-#include "QWinTaskbarButton.h"
-#endif
 
 #include <QMainWindow>
 #include <QThread>
@@ -38,10 +35,9 @@ private slots:
     void onExtractionProgress(int progress);
     void onExtractionStarted();
 
+
 private:
 #ifdef _WIN32
-    QWinTaskbarButton* taskbarButton;
-    QWinTaskbarProgress* taskbarProgress;
 #endif
     Ui::MainWindow *ui;
     QThread *workerThread;
@@ -50,7 +46,6 @@ protected:
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dropEvent(QDropEvent *event) override;
     #ifdef _WIN32
-    void showEvent(QShowEvent *event) override;
     #endif
 };
 

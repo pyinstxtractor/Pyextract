@@ -8,10 +8,7 @@
 #include <QDebug>
 
 
-#ifdef Q_OS_WIN
-#include <QWinTaskbarButton>
-#include <QWinTaskbarProgress>
-#endif
+
 #include <qtimer.h>
 
 #include "mainwindow.h"
@@ -25,14 +22,6 @@ MainWindow::MainWindow(QWidget *parent) :
 {
     ui->setupUi(this);
     setWindowTitle("PyInstaller Archive Viewer");
-#ifdef Q_OS_WIN
-    taskbarButton = new QWinTaskbarButton(this);
-    taskbarButton->setWindow(windowHandle());
-
-    taskbarProgress = taskbarButton->progress();
-    taskbarProgress->setRange(0, 100);
-    taskbarProgress->setVisible(true);
-#endif
     ui->progressbar->setStyleSheet("QProgressBar {"
                                    "   height: 30px;"
                                    "   width: 300px;"
@@ -57,20 +46,6 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
-#ifdef Q_OS_WIN
-void MainWindow::showEvent(QShowEvent *event)
-{
-    QMainWindow::showEvent(event);
-
-    // Initialize taskbar button and progress
-    taskbarButton = new QWinTaskbarButton(this);
-    taskbarButton->setWindow(this->windowHandle());
-
-    taskbarProgress = taskbarButton->progress();
-    taskbarProgress->setMinimum(0);
-    taskbarProgress->setMaximum(100);
-}
-#endif
 
 void MainWindow::dragEnterEvent(QDragEnterEvent *event)
 {
@@ -115,14 +90,6 @@ void MainWindow::processFile(const QString &filePath)
     std::string stdFilePath = filePath.toStdString();
     PyInstArchive archive(stdFilePath);
 
-
-#ifdef Q_OS_WIN
-    // Initialize taskbar progress only
-    if (taskbarProgress) {
-        taskbarProgress->setValue(0);
-        taskbarProgress->setVisible(true);
-    }
-#endif
     // Step 1: Open the Archive
     if (!archive.open()) {
         qDebug() << "[-] File open failed.";
@@ -130,9 +97,7 @@ void MainWindow::processFile(const QString &filePath)
         return;
     }
     qDebug() << "[+] File open!";
-	#ifdef Q_OS_WIN
-    taskbarProgress->setValue(25);
-#endif
+
     // Step 2: Check File Validity
     if (!archive.checkFile()) {
         qDebug() << "[-] File check failed.";
@@ -140,9 +105,6 @@ void MainWindow::processFile(const QString &filePath)
         return;
     }
     qDebug() << "[+] File check passed!";
-#ifdef Q_OS_WIN
-    taskbarProgress->setValue(50);
-#endif
     // Step 3: Extract Archive Information
     if (!archive.getCArchiveInfo()) {
         qDebug() << "[-] Failed to extract archive info.";
@@ -150,14 +112,6 @@ void MainWindow::processFile(const QString &filePath)
         return;
     }
     qDebug() << "[+] Archive info extracted successfully!";
-#ifdef Q_OS_WIN
-    taskbarProgress->setValue(100);
-
-    // Hide taskbar progress once complete
-    QTimer::singleShot(1000, this, [this]() {
-        taskbarProgress->hide();
-    });
-#endif
     archive.displayInfo(ui->listWidget);
 }
 
@@ -188,22 +142,11 @@ void MainWindow::onExtractButtonClicked()
     // Ensure the progress bar is visible
     ui->progressbar->setValue(0);
     ui->progressbar->show();
-#ifdef Q_OS_WIN
-    if (taskbarProgress) {
-        taskbarProgress->setValue(0);
-        taskbarProgress->setVisible(true);
-    }
-#endif
 
     connect(workerThread, &QThread::started, worker, &ExtractionWorker::startExtraction);
 
     connect(worker, &ExtractionWorker::progress, this, [=](int value) {
-        ui->progressbar->setValue(value);
-#ifdef Q_OS_WIN
-        if (taskbarProgress) {
-            taskbarProgress->setValue(value);
-        }
-#endif
+    ui->progressbar->setValue(value);
     });
 
     connect(worker, &ExtractionWorker::finished, this, &MainWindow::onExtractionFinished);
@@ -222,23 +165,12 @@ void MainWindow::onExtractionStarted()
 void MainWindow::onExtractionProgress(int progress)
 {
     ui->progressbar->setValue(progress);
-#ifdef Q_OS_WIN
-    if (taskbarProgress) {
-        taskbarProgress->setValue(progress);
-    }
-#endif
 }
 
 void MainWindow::onExtractionFinished()
 {
     QMessageBox::information(this, "Success", "Extraction complete!");
     ui->progressbar->setValue(100);
-#ifdef Q_OS_WIN
-    if (taskbarProgress) {
-        taskbarProgress->setValue(100);
-        taskbarProgress->hide(); //  hide once done
-    }
-#endif
 }
 
 void MainWindow::onErrorOccurred(const QString& errorMessage)
