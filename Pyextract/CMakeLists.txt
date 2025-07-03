@@ -1,13 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(PyInstallerViewer VERSION 1.0 LANGUAGES CXX)  # Ensure versioning is defined
-
-# Resolve absolute paths dynamically
-get_filename_component(QTWINEXTRAS_PATH "${CMAKE_SOURCE_DIR}/qtwinextras-dev" ABSOLUTE)
-set(BUILD_RELEASE_PATH "${CMAKE_BINARY_DIR}")  # Correctly set build path
-
-message(STATUS "Resolved qtwinextras-dev Path: ${QTWINEXTRAS_PATH}")
-message(STATUS "Resolved Build Release Path: ${BUILD_RELEASE_PATH}")
+project(PyInstallerViewer VERSION 1.0 LANGUAGES CXX)
 
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
@@ -16,13 +9,8 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(QT NAMES Qt6 REQUIRED COMPONENTS Widgets WinExtras)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets WinExtras)
-
-get_filename_component(ACTUAL_INCLUDE_DIR "${QTWINEXTRAS_PATH}/src/winextras" ABSOLUTE)
-message(STATUS "Resolved Include Directory: ${ACTUAL_INCLUDE_DIR}")
-
-include_directories(${ACTUAL_INCLUDE_DIR})
+find_package(QT NAMES Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
 
 set(PROJECT_SOURCES
     extractionworker.cpp
@@ -52,8 +40,7 @@ else()
     endif()
 endif()
 
-# Instead of `add_subdirectory()`, link against the precompiled library
-target_link_libraries(PyInstallerViewer PRIVATE Qt${QT_VERSION_MAJOR}::Widgets "${BUILD_RELEASE_PATH}/lib/Qt6WinExtras.lib")
+target_link_libraries(PyInstallerViewer PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
 
 if(${QT_VERSION} VERSION_LESS 6.1.0)
     set(BUNDLE_ID_OPTION MACOSX_BUNDLE_GUI_IDENTIFIER com.example.PyInstallerViewer)
