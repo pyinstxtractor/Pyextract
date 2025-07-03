@@ -10,7 +10,7 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 
 # Source and header files
 set(SOURCES
-    src/Pyinstaller.cpp
+    src/PyInstaller.cpp
     src/ThreadPool.cpp
 )
 
