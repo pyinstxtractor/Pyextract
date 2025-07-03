@@ -460,15 +460,18 @@ std::string PyInstArchive::decodeEntryName(std::vector<char>& nameBuffer, uint32
  * @param typeCmprsData The type of compressed data.
  * @param name The name of the entry.
  */
-void PyInstArchive::addTOCEntry(uint32_t entryPos, uint32_t cmprsdDataSize, uint32_t uncmprsdDataSize, uint8_t cmprsFlag, char typeCmprsData, const std::string& name) {
-    tocList.emplace_back(
-        overlayPos + entryPos,
-        cmprsdDataSize,
-        uncmprsdDataSize,
-        cmprsFlag,
-        typeCmprsData,
-        name
-    );
+void PyInstArchive::addTOCEntry(uint32_t entryPos, uint32_t cmprsdDataSize, uint32_t uncmprsdDataSize, uint8_t cmprsFlag, char typeCmprsData, std::string name) {
+  if ((typeCmprsData == 's' || typeCmprsData == 'm') && name.find('.') == std::string::npos) {
+    name += ".pyc";
+  }
+  tocList.emplace_back(
+    overlayPos + entryPos,
+    cmprsdDataSize,
+    uncmprsdDataSize,
+    cmprsFlag,
+    typeCmprsData,
+    name
+  );
 }
 
 /**
