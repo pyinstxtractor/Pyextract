@@ -1,14 +1,11 @@
 cmake_minimum_required(VERSION 3.15)
 project(PyInstaller_CPP LANGUAGES CXX)
 
-# Use C++17
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Include directories
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
-# Source and header files
 set(SOURCES
     src/PyInstaller.cpp
     src/ThreadPool.cpp
@@ -21,8 +18,10 @@ set(HEADERS
     include/zlib.h
 )
 
-# Define the executable
 add_executable(PyExtract ${SOURCES} ${HEADERS})
 
-# Link zlib statically (adjust path if needed)
-target_link_libraries(PyExtract PRIVATE ${PROJECT_SOURCE_DIR}/lib/libz-static.lib)
+if(WIN32)
+    target_link_libraries(PyExtract PRIVATE ${PROJECT_SOURCE_DIR}/lib/libz-static.lib)
+elseif(UNIX)
+    target_link_libraries(PyExtract PRIVATE ${PROJECT_SOURCE_DIR}/lib/libz.a)
+endif()
