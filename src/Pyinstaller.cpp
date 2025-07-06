@@ -36,15 +36,15 @@ PyInstArchive::PyInstArchive(const std::string& path) : filePath(path), fileSize
  * @return true if the file was successfully opened, false otherwise.
  */
 bool PyInstArchive::open() {
-    fPtr.open(filePath, std::ios::binary);
-    if (!fPtr.is_open()) {
-        std::cerr << "[!] Error: Could not open " << filePath << std::endl;
-        return false;
-    }
-    fPtr.seekg(0, std::ios::end);
-    fileSize = fPtr.tellg();
-    fPtr.seekg(0, std::ios::beg);
-    return true;
+		fPtr.open(filePath, std::ios::binary);
+		if (!fPtr.is_open()) {
+				std::cerr << "[!] Error: Could not open " << filePath << std::endl;
+				return false;
+		}
+		fPtr.seekg(0, std::ios::end);
+		fileSize = fPtr.tellg();
+		fPtr.seekg(0, std::ios::beg);
+		return true;
 }
 
 /**
@@ -55,9 +55,9 @@ bool PyInstArchive::open() {
  * releasing the file handle.
  */
 void PyInstArchive::close() {
-    if (fPtr.is_open()) {
-        fPtr.close();
-    }
+		if (fPtr.is_open()) {
+				fPtr.close();
+		}
 }
 
 /**
@@ -73,7 +73,7 @@ void PyInstArchive::close() {
  *       directly through the returned reference. To modify the TOC entries, use appropriate member functions.
  */
 const std::vector<CTOCEntry>& PyInstArchive::getTOCList() const {
-    return tocList;
+		return tocList;
 }
 
 /**
@@ -85,19 +85,19 @@ const std::vector<CTOCEntry>& PyInstArchive::getTOCList() const {
  * @return True if the file is valid and the version is determined, otherwise false.
  */
 bool PyInstArchive::checkFile() {
-    std::cout << "[+] Processing " << filePath << std::endl;
-    const size_t searchChunkSize = 8192;
+		std::cout << "[+] Processing " << filePath << std::endl;
+		const size_t searchChunkSize = 8192;
 
-    if (!isFileValid(searchChunkSize)) {
-        return false;
-    }
+		if (!isFileValid(searchChunkSize)) {
+				return false;
+		}
 
-    if (!findCookie(searchChunkSize)) {
-        return false;
-    }
+		if (!findCookie(searchChunkSize)) {
+				return false;
+		}
 
-    determinePyinstallerVersion();
-    return true;
+		determinePyinstallerVersion();
+		return true;
 }
 
 /**
@@ -110,11 +110,11 @@ bool PyInstArchive::checkFile() {
  * @return True if the file size is valid, otherwise false.
  */
 bool PyInstArchive::isFileValid(size_t searchChunkSize) {
-    if (fileSize < MAGIC.size()) {
-        std::cerr << "[!] Error: File is too short or truncated" << std::endl;
-        return false;
-    }
-    return true;
+		if (fileSize < MAGIC.size()) {
+				std::cerr << "[!] Error: File is too short or truncated" << std::endl;
+				return false;
+		}
+		return true;
 }
 
 /**
@@ -127,36 +127,36 @@ bool PyInstArchive::isFileValid(size_t searchChunkSize) {
  * @return True if the cookie position is found, otherwise false.
  */
 bool PyInstArchive::findCookie(size_t searchChunkSize) {
-    uint64_t endPos = fileSize;
-    cookiePos = -1;
-    std::vector<char> buffer(searchChunkSize + MAGIC.size() - 1);
+		uint64_t endPos = fileSize;
+		cookiePos = -1;
+		std::vector<char> buffer(searchChunkSize + MAGIC.size() - 1);
 
-    while (endPos >= MAGIC.size()) {
-        uint64_t startPos = (endPos >= searchChunkSize) ? endPos - searchChunkSize : 0;
-        size_t chunkSize = endPos - startPos;
+		while (endPos >= MAGIC.size()) {
+				uint64_t startPos = (endPos >= searchChunkSize) ? endPos - searchChunkSize : 0;
+				size_t chunkSize = endPos - startPos;
 
-        fPtr.seekg(startPos, std::ios::beg);
-        fPtr.read(buffer.data(), chunkSize);
+				fPtr.seekg(startPos, std::ios::beg);
+				fPtr.read(buffer.data(), chunkSize);
 
-        for (size_t i = chunkSize; i < buffer.size(); ++i) {
-            buffer[i] = buffer[i - chunkSize];
-        }
+				for (size_t i = chunkSize; i < buffer.size(); ++i) {
+						buffer[i] = buffer[i - chunkSize];
+				}
 
-        for (size_t i = chunkSize; i-- > 0;) {
-            if (std::memcmp(buffer.data() + i, MAGIC.c_str(), MAGIC.size()) == 0) {
-                cookiePos = startPos + i;
-                return true;
-            }
-        }
+				for (size_t i = chunkSize; i-- > 0;) {
+						if (std::memcmp(buffer.data() + i, MAGIC.c_str(), MAGIC.size()) == 0) {
+								cookiePos = startPos + i;
+								return true;
+						}
+				}
 
-        endPos = startPos + MAGIC.size() - 1;
-        if (startPos == 0) {
-            break;
-        }
-    }
+				endPos = startPos + MAGIC.size() - 1;
+				if (startPos == 0) {
+						break;
+				}
+		}
 
-    std::cerr << "[!] Error: Missing cookie, unsupported pyinstaller version or not a pyinstaller archive" << std::endl;
-    return false;
+		std::cerr << "[!] Error: Missing cookie, unsupported pyinstaller version or not a pyinstaller archive" << std::endl;
+		return false;
 }
 
 /**
@@ -166,19 +166,19 @@ bool PyInstArchive::findCookie(size_t searchChunkSize) {
  * If found, it sets the PyInstaller version to 2.1 or higher; otherwise, it sets the version to 2.0.
  */
 void PyInstArchive::determinePyinstallerVersion() {
-    fPtr.seekg(cookiePos + PYINST20_COOKIE_SIZE, std::ios::beg);
-    std::vector<char> buffer64(64);
-    fPtr.read(buffer64.data(), 64);
-    std::string bufferStr(buffer64.data(), buffer64.size());
+		fPtr.seekg(cookiePos + PYINST20_COOKIE_SIZE, std::ios::beg);
+		std::vector<char> buffer64(64);
+		fPtr.read(buffer64.data(), 64);
+		std::string bufferStr(buffer64.data(), buffer64.size());
 
-    if (bufferStr.find("python") != std::string::npos) {
-        std::cout << "[+] Pyinstaller version: 2.1+" << std::endl;
-        pyinstVer = 21;
-    }
-    else {
-        std::cout << "[+] Pyinstaller version: 2.0" << std::endl;
-        pyinstVer = 20;
-    }
+		if (bufferStr.find("python") != std::string::npos) {
+				std::cout << "[+] Pyinstaller version: 2.1+" << std::endl;
+				pyinstVer = 21;
+		}
+		else {
+				std::cout << "[+] Pyinstaller version: 2.0" << std::endl;
+				pyinstVer = 20;
+		}
 }
 
 /**
@@ -191,10 +191,10 @@ void PyInstArchive::determinePyinstallerVersion() {
  * @return The integer with swapped byte order.
  */
 uint32_t swapBytes(uint32_t value) {
-    return ((value >> 24) & 0x000000FF) |
-        ((value >> 8) & 0x0000FF00) |
-        ((value << 8) & 0x00FF0000) |
-        ((value << 24) & 0xFF000000);
+		return ((value >> 24) & 0x000000FF) |
+				((value >> 8) & 0x0000FF00) |
+				((value << 8) & 0x00FF0000) |
+				((value << 24) & 0xFF000000);
 }
 
 /**
@@ -214,40 +214,40 @@ uint32_t swapBytes(uint32_t value) {
  * @note The function uses `malloc` for buffer allocation and `free` for deallocation.
  */
 size_t getPhysicalCoreCount() {
-    DWORD length = 0;
-    // Initial call to get buffer size
-    GetLogicalProcessorInformation(nullptr, &length);
-    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-        std::cerr << "[!] Error: Unable to determine buffer size for processor information.\n";
-        return 1; // Default to 1 if unable to determine
-    }
+		DWORD length = 0;
+		// Initial call to get buffer size
+		GetLogicalProcessorInformation(nullptr, &length);
+		if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+				std::cerr << "[!] Error: Unable to determine buffer size for processor information.\n";
+				return 1; // Default to 1 if unable to determine
+		}
 
-    // Allocate buffer for processor information
-    SYSTEM_LOGICAL_PROCESSOR_INFORMATION* buffer = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION*>(malloc(length));
-    if (buffer == nullptr) {
-        std::cerr << "[!] Error: Memory allocation failed.\n";
-        return 1;
-    }
+		// Allocate buffer for processor information
+		SYSTEM_LOGICAL_PROCESSOR_INFORMATION* buffer = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION*>(malloc(length));
+		if (buffer == nullptr) {
+				std::cerr << "[!] Error: Memory allocation failed.\n";
+				return 1;
+		}
 
-    // Retrieve processor information
-    if (!GetLogicalProcessorInformation(buffer, &length)) {
-        std::cerr << "[!] Error: Unable to get logical processor information.\n";
-        free(buffer);
-        return 1;
-    }
+		// Retrieve processor information
+		if (!GetLogicalProcessorInformation(buffer, &length)) {
+				std::cerr << "[!] Error: Unable to get logical processor information.\n";
+				free(buffer);
+				return 1;
+		}
 
-    DWORD processorCoreCount = 0;
-    DWORD count = length / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION);
+		DWORD processorCoreCount = 0;
+		DWORD count = length / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION);
 
-    // Count the number of physical cores
-    for (DWORD i = 0; i < count; ++i) {
-        if (buffer[i].Relationship == RelationProcessorCore) {
-            processorCoreCount++;
-        }
-    }
+		// Count the number of physical cores
+		for (DWORD i = 0; i < count; ++i) {
+				if (buffer[i].Relationship == RelationProcessorCore) {
+						processorCoreCount++;
+				}
+		}
 
-    free(buffer);
-    return static_cast<size_t>(processorCoreCount);
+		free(buffer);
+		return static_cast<size_t>(processorCoreCount);
 }
 
 /**
@@ -259,27 +259,27 @@ size_t getPhysicalCoreCount() {
  * @return True if the information is successfully extracted, otherwise false.
  */
 bool PyInstArchive::getCArchiveInfo() {
-    try {
-        uint32_t lengthofPackage, toc, tocLen, pyver;
-        readArchiveData(lengthofPackage, toc, tocLen, pyver);
-        calculateOverlayInfo(lengthofPackage, toc, tocLen);
+		try {
+				uint32_t lengthofPackage, toc, tocLen, pyver;
+				readArchiveData(lengthofPackage, toc, tocLen, pyver);
+				calculateOverlayInfo(lengthofPackage, toc, tocLen);
 
 #ifdef _DEBUG
-        debugOutput(lengthofPackage);
+				debugOutput(lengthofPackage);
 #endif
 
-        parseTOC();
+				parseTOC();
 
 #ifdef _DEBUG
-        debugEntrySizes();
+				debugEntrySizes();
 #endif
 
-    }
-    catch (...) {
-        std::cerr << "[!] Error: The file is not a PyInstaller archive" << std::endl;
-        return false;
-    }
-    return true;
+		}
+		catch (...) {
+				std::cerr << "[!] Error: The file is not a PyInstaller archive" << std::endl;
+				return false;
+		}
+		return true;
 }
 
 /**
@@ -294,16 +294,16 @@ bool PyInstArchive::getCArchiveInfo() {
  * @param pyver Reference to store the Python version.
  */
 void PyInstArchive::readArchiveData(uint32_t& lengthofPackage, uint32_t& toc, uint32_t& tocLen, uint32_t& pyver) {
-    fPtr.seekg(cookiePos, std::ios::beg);
-    char buffer[PYINST21_COOKIE_SIZE];  // Use a single buffer to handle both versions
-    fPtr.read(buffer, (pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE);
+		fPtr.seekg(cookiePos, std::ios::beg);
+		char buffer[PYINST21_COOKIE_SIZE];  // Use a single buffer to handle both versions
+		fPtr.read(buffer, (pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE);
 
-    if (pyinstVer == 20 || pyinstVer == 21) {
-        lengthofPackage = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 8));
-        toc = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 12));
-        tocLen = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 16));
-        pyver = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 20));
-    }
+		if (pyinstVer == 20 || pyinstVer == 21) {
+				lengthofPackage = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 8));
+				toc = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 12));
+				tocLen = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 16));
+				pyver = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 20));
+		}
 }
 
 
@@ -318,11 +318,11 @@ void PyInstArchive::readArchiveData(uint32_t& lengthofPackage, uint32_t& toc, ui
  * @param tocLen The length of the table of contents extracted from the archive.
  */
 void PyInstArchive::calculateOverlayInfo(uint32_t lengthofPackage, uint32_t toc, uint32_t tocLen) {
-    uint64_t tailBytes = fileSize - cookiePos - ((pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE);
-    overlaySize = static_cast<uint64_t>(lengthofPackage) + tailBytes;
-    overlayPos = fileSize - overlaySize;
-    tableOfContentsPos = overlayPos + toc;
-    tableOfContentsSize = tocLen;
+		uint64_t tailBytes = fileSize - cookiePos - ((pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE);
+		overlaySize = static_cast<uint64_t>(lengthofPackage) + tailBytes;
+		overlayPos = fileSize - overlaySize;
+		tableOfContentsPos = overlayPos + toc;
+		tableOfContentsSize = tocLen;
 }
 
 #ifdef _DEBUG
@@ -335,11 +335,11 @@ void PyInstArchive::calculateOverlayInfo(uint32_t lengthofPackage, uint32_t toc,
  * @param lengthofPackage The length of the package extracted from the archive.
  */
 void PyInstArchive::debugOutput(uint32_t lengthofPackage) {
-    std::cout << "[+] Length of package: " << lengthofPackage << " bytes" << std::endl;
-    std::cout << "[DEBUG] overlaySize: " << overlaySize << std::endl;
-    std::cout << "[DEBUG] overlayPos: " << overlayPos << std::endl;
-    std::cout << "[DEBUG] tableOfContentsPos: " << tableOfContentsPos << std::endl;
-    std::cout << "[DEBUG] tableOfContentsSize: " << tableOfContentsSize << std::endl;
+		std::cout << "[+] Length of package: " << lengthofPackage << " bytes" << std::endl;
+		std::cout << "[DEBUG] overlaySize: " << overlaySize << std::endl;
+		std::cout << "[DEBUG] overlayPos: " << overlayPos << std::endl;
+		std::cout << "[DEBUG] tableOfContentsPos: " << tableOfContentsPos << std::endl;
+		std::cout << "[DEBUG] tableOfContentsSize: " << tableOfContentsSize << std::endl;
 }
 
 /**
@@ -349,12 +349,12 @@ void PyInstArchive::debugOutput(uint32_t lengthofPackage) {
  * name and compressed data size of each entry.
  */
 void PyInstArchive::debugEntrySizes() {
-    std::cout << "[DEBUG] Entry sizes in the CArchive:" << std::endl;
-    for (const auto& entry : tocList) {
-        std::cout << "[DEBUG] Entry Name: " << entry.getName()
-            << ", Compressed Size: " << entry.getCompressedDataSize() << " bytes"
-            << std::endl;
-    }
+		std::cout << "[DEBUG] Entry sizes in the CArchive:" << std::endl;
+		for (const auto& entry : tocList) {
+				std::cout << "[DEBUG] Entry Name: " << entry.getName()
+						<< ", Compressed Size: " << entry.getCompressedDataSize() << " bytes"
+						<< std::endl;
+		}
 }
 #endif
 
@@ -365,28 +365,28 @@ void PyInstArchive::debugEntrySizes() {
  * the necessary metadata for each entry, storing them in a list.
  */
 void PyInstArchive::parseTOC() {
-    fPtr.seekg(tableOfContentsPos, std::ios::beg);
-    tocList.clear();
-    uint32_t parsedLen = 0;
+		fPtr.seekg(tableOfContentsPos, std::ios::beg);
+		tocList.clear();
+		uint32_t parsedLen = 0;
 
-    while (parsedLen < tableOfContentsSize) {
-        uint32_t entrySize;
-        if (!readEntrySize(entrySize)) break;
+		while (parsedLen < tableOfContentsSize) {
+				uint32_t entrySize;
+				if (!readEntrySize(entrySize)) break;
 
-        std::vector<char> nameBuffer(entrySize - sizeofEntry());
-        uint32_t entryPos, cmprsdDataSize, uncmprsdDataSize;
-        uint8_t cmprsFlag;
-        char typeCmprsData;
+				std::vector<char> nameBuffer(entrySize - sizeofEntry());
+				uint32_t entryPos, cmprsdDataSize, uncmprsdDataSize;
+				uint8_t cmprsFlag;
+				char typeCmprsData;
 
-        readEntryFields(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, nameBuffer, entrySize);
+				readEntryFields(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, nameBuffer, entrySize);
 
-        std::string name = decodeEntryName(nameBuffer, parsedLen);
-        addTOCEntry(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, name);
+				std::string name = decodeEntryName(nameBuffer, parsedLen);
+				addTOCEntry(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, name);
 
-        parsedLen += entrySize;
-    }
+				parsedLen += entrySize;
+		}
 
-    std::cout << "[+] Found " << tocList.size() << " files in CArchive" << std::endl;
+		std::cout << "[+] Found " << tocList.size() << " files in CArchive" << std::endl;
 }
 
 /**
@@ -396,11 +396,11 @@ void PyInstArchive::parseTOC() {
  * @return True if the entry size was successfully read, otherwise false.
  */
 bool PyInstArchive::readEntrySize(uint32_t& entrySize) {
-    fPtr.read(reinterpret_cast<char*>(&entrySize), sizeof(entrySize));
-    if (fPtr.gcount() < sizeof(entrySize)) return false;
+		fPtr.read(reinterpret_cast<char*>(&entrySize), sizeof(entrySize));
+		if (fPtr.gcount() < sizeof(entrySize)) return false;
 
-    entrySize = swapBytes(entrySize);
-    return true;
+		entrySize = swapBytes(entrySize);
+		return true;
 }
 
 /**
@@ -415,18 +415,18 @@ bool PyInstArchive::readEntrySize(uint32_t& entrySize) {
  * @param entrySize The size of the entry.
  */
 void PyInstArchive::readEntryFields(uint32_t& entryPos, uint32_t& cmprsdDataSize, uint32_t& uncmprsdDataSize, uint8_t& cmprsFlag, char& typeCmprsData, std::vector<char>& nameBuffer, uint32_t entrySize) {
-    uint32_t nameLen = sizeofEntry();
-    fPtr.read(reinterpret_cast<char*>(&entryPos), sizeof(entryPos));
-    fPtr.read(reinterpret_cast<char*>(&cmprsdDataSize), sizeof(cmprsdDataSize));
-    fPtr.read(reinterpret_cast<char*>(&uncmprsdDataSize), sizeof(uncmprsdDataSize));
-    fPtr.read(reinterpret_cast<char*>(&cmprsFlag), sizeof(cmprsFlag));
-    fPtr.read(reinterpret_cast<char*>(&typeCmprsData), sizeof(typeCmprsData));
+		uint32_t nameLen = sizeofEntry();
+		fPtr.read(reinterpret_cast<char*>(&entryPos), sizeof(entryPos));
+		fPtr.read(reinterpret_cast<char*>(&cmprsdDataSize), sizeof(cmprsdDataSize));
+		fPtr.read(reinterpret_cast<char*>(&uncmprsdDataSize), sizeof(uncmprsdDataSize));
+		fPtr.read(reinterpret_cast<char*>(&cmprsFlag), sizeof(cmprsFlag));
+		fPtr.read(reinterpret_cast<char*>(&typeCmprsData), sizeof(typeCmprsData));
 
-    entryPos = swapBytes(entryPos);
-    cmprsdDataSize = swapBytes(cmprsdDataSize);
-    uncmprsdDataSize = swapBytes(uncmprsdDataSize);
+		entryPos = swapBytes(entryPos);
+		cmprsdDataSize = swapBytes(cmprsdDataSize);
+		uncmprsdDataSize = swapBytes(uncmprsdDataSize);
 
-    fPtr.read(nameBuffer.data(), entrySize - nameLen);
+		fPtr.read(nameBuffer.data(), entrySize - nameLen);
 }
 
 /**
@@ -437,14 +437,14 @@ void PyInstArchive::readEntryFields(uint32_t& entryPos, uint32_t& cmprsdDataSize
  * @return The decoded and normalized entry name.
  */
 std::string PyInstArchive::decodeEntryName(std::vector<char>& nameBuffer, uint32_t parsedLen) {
-    std::string name(nameBuffer.data(), nameBuffer.size());
-    name.erase(std::remove(name.begin(), name.end(), '\0'), name.end());
+		std::string name(nameBuffer.data(), nameBuffer.size());
+		name.erase(std::remove(name.begin(), name.end(), '\0'), name.end());
 
-    if (name.empty() || name[0] == '/') {
-        name = "unnamed_" + std::to_string(parsedLen);
-    }
+		if (name.empty() || name[0] == '/') {
+				name = "unnamed_" + std::to_string(parsedLen);
+		}
 
-    return name;
+		return name;
 }
 
 /**
@@ -458,17 +458,17 @@ std::string PyInstArchive::decodeEntryName(std::vector<char>& nameBuffer, uint32
  * @param name The name of the entry.
  */
 void PyInstArchive::addTOCEntry(uint32_t entryPos, uint32_t cmprsdDataSize, uint32_t uncmprsdDataSize, uint8_t cmprsFlag, char typeCmprsData, std::string name) {
-  if ((typeCmprsData == 's' || typeCmprsData == 'm') && name.find('.') == std::string::npos) {
-    name += ".pyc";
-  }
-  tocList.emplace_back(
-    overlayPos + entryPos,
-    cmprsdDataSize,
-    uncmprsdDataSize,
-    cmprsFlag,
-    typeCmprsData,
-    name
-  );
+		if ((typeCmprsData == 's' || typeCmprsData == 'm') && name.find('.') == std::string::npos) {
+				name += ".pyc";
+		}
+		tocList.emplace_back(
+				overlayPos + entryPos,
+				cmprsdDataSize,
+				uncmprsdDataSize,
+				cmprsFlag,
+				typeCmprsData,
+				name
+		);
 }
 
 /**
@@ -477,7 +477,7 @@ void PyInstArchive::addTOCEntry(uint32_t entryPos, uint32_t cmprsdDataSize, uint
  * @return The size of the standard TOC entry fields.
  */
 uint32_t PyInstArchive::sizeofEntry() const {
-    return sizeof(uint32_t) + sizeof(uint32_t) * 3 + sizeof(uint8_t) + sizeof(char);
+		return sizeof(uint32_t) + sizeof(uint32_t) * 3 + sizeof(uint8_t) + sizeof(char);
 }
 
 /**
@@ -487,12 +487,12 @@ uint32_t PyInstArchive::sizeofEntry() const {
  * and uncompressed sizes of the embedded files.
  */
 void PyInstArchive::displayInfo() {
-    std::cout << "[+] Archive Info:" << std::endl;
-    // Print out relevant information about the PyInstaller archive
-    // For example: number of files, archive version, etc.
-    for (const auto& entry : tocList) {
-        std::cout << "File: " << entry.getName() << ", Size: " << entry.getCompressedDataSize() << " bytes" << std::endl;
-    }
+		std::cout << "[+] Archive Info:" << std::endl;
+		// Print out relevant information about the PyInstaller archive
+		// For example: number of files, archive version, etc.
+		for (const auto& entry : tocList) {
+				std::cout << "File: " << entry.getName() << ", Size: " << entry.getCompressedDataSize() << " bytes" << std::endl;
+		}
 }
 
 /**
@@ -505,18 +505,18 @@ void PyInstArchive::displayInfo() {
  * @param outputDir The directory where the extracted files will be saved.
  */
 void PyInstArchive::timeExtractionProcess(const std::string& outputDir) {
-    // Determine the number of physical cores to use as threads
-    size_t numThreads = getPhysicalCoreCount();
+		// Determine the number of physical cores to use as threads
+		size_t numThreads = getPhysicalCoreCount();
 
-    auto start = std::chrono::high_resolution_clock::now();
+		auto start = std::chrono::high_resolution_clock::now();
 
-    // Call MultiThreadedFileExtract with the required arguments
-    MultiThreadedFileExtract(tocList, outputDir, numThreads);
+		// Call MultiThreadedFileExtract with the required arguments
+		MultiThreadedFileExtract(tocList, outputDir, numThreads);
 
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
+		auto end = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double> elapsed = end - start;
 
-    std::cout << "[*] Extraction completed in " << elapsed.count() << " seconds.\n";
+		std::cout << "[*] Extraction completed in " << elapsed.count() << " seconds.\n";
 }
 
 /**
@@ -536,34 +536,34 @@ void PyInstArchive::timeExtractionProcess(const std::string& outputDir) {
  * @note The ThreadPool destructor ensures all tasks are completed before the program continues.
  */
 void PyInstArchive::MultiThreadedFileExtract(const std::vector<CTOCEntry>& tocEntries, const std::string& outputDir, size_t numThreads) {
-    size_t maxCores = getPhysicalCoreCount();  // Function to get number of physical cores
+		size_t maxCores = getPhysicalCoreCount();  // Function to get number of physical cores
 
-    // Validate user-specified number of threads
-    if (numThreads == 0) {
-        numThreads = maxCores;
-        std::cout << "[*] Using all available physical cores: " << numThreads << "\n";
-    }
-    else {
-        if (numThreads > maxCores) {
-            std::cout << "[!] Specified number of cores (" << numThreads << ") exceeds available physical cores (" << maxCores << "). Using maximum available cores.\n";
-            numThreads = maxCores;
-        }
-        else {
-            std::cout << "[*] Using user-specified number of cores: " << numThreads << "\n";
-        }
-    }
+		// Validate user-specified number of threads
+		if (numThreads == 0) {
+				numThreads = maxCores;
+				std::cout << "[*] Using all available physical cores: " << numThreads << "\n";
+		}
+		else {
+				if (numThreads > maxCores) {
+						std::cout << "[!] Specified number of cores (" << numThreads << ") exceeds available physical cores (" << maxCores << "). Using maximum available cores.\n";
+						numThreads = maxCores;
+				}
+				else {
+						std::cout << "[*] Using user-specified number of cores: " << numThreads << "\n";
+				}
+		}
 
-    if (numThreads == 0) numThreads = 1;  // Ensure at least one thread
+		if (numThreads == 0) numThreads = 1;  // Ensure at least one thread
 
-    // Initialize ThreadPool with the specified number of threads
-    ThreadPool pool(numThreads);
+		// Initialize ThreadPool with the specified number of threads
+		ThreadPool pool(numThreads);
 
-    // Enqueue tasks
-    for (const auto& tocEntry : tocEntries) {
-        pool.enqueue([this, &tocEntry, &outputDir] {
-            this->decompressAndExtractFile(tocEntry, outputDir, mtx, printMtx);
-            });
-    }
+		// Enqueue tasks
+		for (const auto& tocEntry : tocEntries) {
+				pool.enqueue([this, &tocEntry, &outputDir] {
+						this->decompressAndExtractFile(tocEntry, outputDir, mtx, printMtx);
+						});
+		}
 }
 
 /**
@@ -586,65 +586,65 @@ void PyInstArchive::MultiThreadedFileExtract(const std::vector<CTOCEntry>& tocEn
  * @note This method is designed to be thread-safe and can be called concurrently by multiple threads.
  */
 void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const std::string& outputDir, std::mutex& mtx, std::mutex& printMtx) {
-    std::vector<char> compressedData;
+		std::vector<char> compressedData;
 
-    // Read Compressed Data with File Lock
-    {
-        std::lock_guard<std::mutex> lock(mtx);
-        fPtr.seekg(tocEntry.position, std::ios::beg);
-        compressedData.resize(tocEntry.getCompressedDataSize());
-        fPtr.read(compressedData.data(), tocEntry.getCompressedDataSize());
-    }
+		// Read Compressed Data with File Lock
+		{
+				std::lock_guard<std::mutex> lock(mtx);
+				fPtr.seekg(tocEntry.position, std::ios::beg);
+				compressedData.resize(tocEntry.getCompressedDataSize());
+				fPtr.read(compressedData.data(), tocEntry.getCompressedDataSize());
+		}
 
-    // Decompress Data
-    std::vector<char> decompressedData;
-    if (tocEntry.isCompressed()) {
-        decompressedData.resize(tocEntry.uncmprsdDataSize);
+		// Decompress Data
+		std::vector<char> decompressedData;
+		if (tocEntry.isCompressed()) {
+				decompressedData.resize(tocEntry.uncmprsdDataSize);
 
-        z_stream strm = {};
-        strm.avail_in = static_cast<uInt>(tocEntry.getCompressedDataSize());
-        strm.next_in = reinterpret_cast<Bytef*>(compressedData.data());
-        strm.avail_out = static_cast<uInt>(tocEntry.uncmprsdDataSize);
-        strm.next_out = reinterpret_cast<Bytef*>(decompressedData.data());
+				z_stream strm = {};
+				strm.avail_in = static_cast<uInt>(tocEntry.getCompressedDataSize());
+				strm.next_in = reinterpret_cast<Bytef*>(compressedData.data());
+				strm.avail_out = static_cast<uInt>(tocEntry.uncmprsdDataSize);
+				strm.next_out = reinterpret_cast<Bytef*>(decompressedData.data());
 
-        if (inflateInit(&strm) != Z_OK) {
-            std::lock_guard<std::mutex> lock(printMtx);
-            std::cerr << "[!] Error: Could not initialize zlib for decompression\n";
-            return;
-        }
+				if (inflateInit(&strm) != Z_OK) {
+						std::lock_guard<std::mutex> lock(printMtx);
+						std::cerr << "[!] Error: Could not initialize zlib for decompression\n";
+						return;
+				}
 
-        int result = inflate(&strm, Z_FINISH);
-        inflateEnd(&strm);
+				int result = inflate(&strm, Z_FINISH);
+				inflateEnd(&strm);
 
-        if (result != Z_STREAM_END) {
-            std::lock_guard<std::mutex> lock(printMtx);
-            std::cerr << "[!] Error: Decompression failed for " << tocEntry.getName() << "\n";
-            return;
-        }
-    }
-    else {
-        decompressedData = std::move(compressedData);
-    }
+				if (result != Z_STREAM_END) {
+						std::lock_guard<std::mutex> lock(printMtx);
+						std::cerr << "[!] Error: Decompression failed for " << tocEntry.getName() << "\n";
+						return;
+				}
+		}
+		else {
+				decompressedData = std::move(compressedData);
+		}
 
-    // Extract File
-    std::filesystem::path outputFilePath = std::filesystem::path(outputDir) / tocEntry.getName();
-    std::filesystem::create_directories(outputFilePath.parent_path());
+		// Extract File
+		std::filesystem::path outputFilePath = std::filesystem::path(outputDir) / tocEntry.getName();
+		std::filesystem::create_directories(outputFilePath.parent_path());
 
-    {
-        std::ofstream outFile(outputFilePath, std::ios::binary);
-        if (!outFile.is_open()) {
-            std::lock_guard<std::mutex> lock(printMtx);
-            std::cerr << "[!] Error: Could not open output file " << outputFilePath << "\n";
-            return;
-        }
-        outFile.write(decompressedData.data(), decompressedData.size());
-    }
+		{
+				std::ofstream outFile(outputFilePath, std::ios::binary);
+				if (!outFile.is_open()) {
+						std::lock_guard<std::mutex> lock(printMtx);
+						std::cerr << "[!] Error: Could not open output file " << outputFilePath << "\n";
+						return;
+				}
+				outFile.write(decompressedData.data(), decompressedData.size());
+		}
 
-    // Log Extraction Success
-    {
-        std::lock_guard<std::mutex> lock(printMtx);
-        std::cout << "[+] Extracted: " << tocEntry.getName() << " (" << decompressedData.size() << " bytes)\n";
-    }
+		// Log Extraction Success
+		{
+				std::lock_guard<std::mutex> lock(printMtx);
+				std::cout << "[+] Extracted: " << tocEntry.getName() << " (" << decompressedData.size() << " bytes)\n";
+		}
 }
 
 /**
@@ -670,92 +670,92 @@ void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const st
  * @param argv The array of command-line arguments.
  */
 void parseArgs(int argc, char* argv[]) {
-    // Default values
-    int numCores = 0; // 0 indicates 'use all available physical cores'
-    std::string command;
-    std::string archivePath;
-    std::string outputDir = "unpacked"; // Default output directory
-    int argIndex = 1;
+		// Default values
+		int numCores = 0; // 0 indicates 'use all available physical cores'
+		std::string command;
+		std::string archivePath;
+		std::string outputDir = "unpacked"; // Default output directory
+		int argIndex = 1;
 
-    // Check if there are enough arguments
-    if (argc < 3) {
-        std::cerr << "[!] Usage: " << argv[0] << " [-cores N] [-i | -u] <archive_path> [output_dir]" << std::endl;
-        exit(1);
-    }
+		// Check if there are enough arguments
+		if (argc < 3) {
+				std::cerr << "[!] Usage: " << argv[0] << " [-cores N] [-i | -u] <archive_path> [output_dir]" << std::endl;
+				exit(1);
+		}
 
-    // Parse arguments
-    while (argIndex < argc) {
-        std::string arg = argv[argIndex];
+		// Parse arguments
+		while (argIndex < argc) {
+				std::string arg = argv[argIndex];
 
-        if (arg == "-cores") {
-            // Handle the -cores argument
-            argIndex++;
-            if (argIndex >= argc) {
-                std::cerr << "[!] Error: Expected number after -cores" << std::endl;
-                exit(1);
-            }
-            numCores = atoi(argv[argIndex]);
-            if (numCores <= 0) {
-                std::cerr << "[!] Invalid number of cores specified. Using all available physical cores." << std::endl;
-                numCores = 0;
-            }
-            argIndex++;
-        }
-        else if (arg == "-i" || arg == "-u") {
-            // Handle the command (-i or -u)
-            command = arg;
-            argIndex++;
-        }
-        else if (archivePath.empty()) {
-            // First argument that's not an option is the archive path
-            archivePath = arg;
-            argIndex++;
-        }
-        else {
-            // Optional output directory
-            outputDir = arg;
-            argIndex++;
-        }
-    }
+				if (arg == "-cores") {
+						// Handle the -cores argument
+						argIndex++;
+						if (argIndex >= argc) {
+								std::cerr << "[!] Error: Expected number after -cores" << std::endl;
+								exit(1);
+						}
+						numCores = atoi(argv[argIndex]);
+						if (numCores <= 0) {
+								std::cerr << "[!] Invalid number of cores specified. Using all available physical cores." << std::endl;
+								numCores = 0;
+						}
+						argIndex++;
+				}
+				else if (arg == "-i" || arg == "-u") {
+						// Handle the command (-i or -u)
+						command = arg;
+						argIndex++;
+				}
+				else if (archivePath.empty()) {
+						// First argument that's not an option is the archive path
+						archivePath = arg;
+						argIndex++;
+				}
+				else {
+						// Optional output directory
+						outputDir = arg;
+						argIndex++;
+				}
+		}
 
-    // Validate required arguments
-    if (command.empty() || archivePath.empty()) {
-        std::cerr << "[!] Usage: " << argv[0] << " [-cores N] [-i | -u] <archive_path> [output_dir]" << std::endl;
-        exit(1);
-    }
+		// Validate required arguments
+		if (command.empty() || archivePath.empty()) {
+				std::cerr << "[!] Usage: " << argv[0] << " [-cores N] [-i | -u] <archive_path> [output_dir]" << std::endl;
+				exit(1);
+		}
 
-    // Check if the output directory exists, create it if it doesn't
-    if (!std::filesystem::exists(outputDir)) {
-        std::filesystem::create_directories(outputDir);
-    }
+		// Check if the output directory exists, create it if it doesn't
+		if (!std::filesystem::exists(outputDir)) {
+				std::filesystem::create_directories(outputDir);
+		}
 
-    PyInstArchive archive(archivePath);
+		PyInstArchive archive(archivePath);
 
-    if (!archive.open()) {
-        std::cerr << "[!] Error: Could not open " << archivePath << std::endl;
-        return;
-    }
+		if (!archive.open()) {
+				std::cerr << "[!] Error: Could not open " << archivePath << std::endl;
+				return;
+		}
 
-    if (!archive.checkFile()) {
-        std::cerr << "[!] Error: Invalid file " << archivePath << std::endl;
-        return;
-    }
+		if (!archive.checkFile()) {
+				std::cerr << "[!] Error: Invalid file " << archivePath << std::endl;
+				return;
+		}
 
-    if (!archive.getCArchiveInfo()) {
-        std::cerr << "[!] Error: Could not extract TOC from " << archivePath << std::endl;
-        return;
-    }
+		if (!archive.getCArchiveInfo()) {
+				std::cerr << "[!] Error: Could not extract TOC from " << archivePath << std::endl;
+				return;
+		}
 
-    if (command == "-i") {
-        archive.displayInfo();  // Display information about the archive (filenames, sizes)
-    }
-    else if (command == "-u") {
-        archive.parseTOC();  // Parse the Table of Contents before extraction
-        archive.MultiThreadedFileExtract(archive.getTOCList(), outputDir, static_cast<size_t>(numCores));
-    }
-    else {
-        std::cerr << "[!] Unknown command: " << command << std::endl;
-    }
+		if (command == "-i") {
+				archive.displayInfo();  // Display information about the archive (filenames, sizes)
+		}
+		else if (command == "-u") {
+				archive.parseTOC();  // Parse the Table of Contents before extraction
+				archive.MultiThreadedFileExtract(archive.getTOCList(), outputDir, static_cast<size_t>(numCores));
+		}
+		else {
+				std::cerr << "[!] Unknown command: " << command << std::endl;
+		}
 }
 
 /**
@@ -774,6 +774,6 @@ void parseArgs(int argc, char* argv[]) {
  *       so no error handling is required in this function.
  */
 int main(int argc, char* argv[]) {
-    parseArgs(argc, argv);
-    return 0;
+		parseArgs(argc, argv);
+		return 0;
 }

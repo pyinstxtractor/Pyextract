@@ -13,34 +13,34 @@
  *       submitted to the pool will not be executed.
  */
 ThreadPool::ThreadPool(size_t numThreads) : stop(false) {
-    for (size_t i = 0; i < numThreads; ++i) {
-        workers.emplace_back(
-            [this] {
-                for (;;) {
-                    std::function<void()> task;
+		for (size_t i = 0; i < numThreads; ++i) {
+				workers.emplace_back(
+						[this] {
+								for (;;) {
+										std::function<void()> task;
 
-                    {
-                        // Acquire lock on the task queue mutex
-                        std::unique_lock<std::mutex> lock(this->queueMutex);
-                        // Wait until there is a task or the pool is stopped
-                        this->condition.wait(lock,
-                            [this] { return this->stop || !this->tasks.empty(); });
+										{
+												// Acquire lock on the task queue mutex
+												std::unique_lock<std::mutex> lock(this->queueMutex);
+												// Wait until there is a task or the pool is stopped
+												this->condition.wait(lock,
+														[this] { return this->stop || !this->tasks.empty(); });
 
-                        // Exit if stop signal is received and no tasks are left
-                        if (this->stop && this->tasks.empty())
-                            return;
+												// Exit if stop signal is received and no tasks are left
+												if (this->stop && this->tasks.empty())
+														return;
 
-                        // Retrieve the next task from the queue
-                        task = std::move(this->tasks.front());
-                        this->tasks.pop();
-                    }
+												// Retrieve the next task from the queue
+												task = std::move(this->tasks.front());
+												this->tasks.pop();
+										}
 
-                    // Execute the retrieved task
-                    task();
-                }
-            }
-        );
-    }
+										// Execute the retrieved task
+										task();
+								}
+						}
+				);
+		}
 }
 
 /*
@@ -55,19 +55,19 @@ ThreadPool::ThreadPool(size_t numThreads) : stop(false) {
  * @note If there are tasks remaining in the queue, they will not be executed.
  */
 ThreadPool::~ThreadPool() {
-    {
-        // Acquire lock on the task queue mutex
-        std::unique_lock<std::mutex> lock(queueMutex);
-        // Set the stop flag to true to signal threads to stop
-        stop = true;
-    }
+		{
+				// Acquire lock on the task queue mutex
+				std::unique_lock<std::mutex> lock(queueMutex);
+				// Set the stop flag to true to signal threads to stop
+				stop = true;
+		}
 
-    // Notify all worker threads that they should check the stop condition
-    condition.notify_all();
+		// Notify all worker threads that they should check the stop condition
+		condition.notify_all();
 
-    // Wait for all worker threads to complete execution
-    for (std::thread& worker : workers)
-        worker.join();
+		// Wait for all worker threads to complete execution
+		for (std::thread& worker : workers)
+				worker.join();
 }
 
 /*
@@ -86,12 +86,12 @@ ThreadPool::~ThreadPool() {
  *       handled within the callable to prevent undefined behavior.
  */
 void ThreadPool::enqueue(std::function<void()> task) {
-    {
-        // Acquire lock on the task queue mutex
-        std::unique_lock<std::mutex> lock(queueMutex);
-        // Add the new task to the queue
-        tasks.emplace(std::move(task));
-    }
-    // Notify one worker thread that a new task is available
-    condition.notify_one();
+		{
+				// Acquire lock on the task queue mutex
+				std::unique_lock<std::mutex> lock(queueMutex);
+				// Add the new task to the queue
+				tasks.emplace(std::move(task));
+		}
+		// Notify one worker thread that a new task is available
+		condition.notify_one();
 }
