@@ -16,8 +16,6 @@
 #include "../include/PyInstArchive.h"
 #include "../include/zlib.h"
 
-
-
 /**
  * @brief The magic string used to identify PyInstaller archives.
  *
@@ -182,7 +180,6 @@ void PyInstArchive::determinePyinstallerVersion() {
         pyinstVer = 20;
     }
 }
-
 
 /**
  * @brief Swaps the byte order of a 32-bit integer to correct endianness.
