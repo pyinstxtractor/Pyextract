@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <QDebug>
 #include <iostream>
+#include <QUuid>
 
 #ifdef Q_OS_WIN
 #include <Qtzlib/zlib.h>
@@ -110,9 +111,22 @@ void PyInstArchive::determinePyinstallerVersion() {
 		fPtr.seekg(cookiePos + PYINST20_COOKIE_SIZE, std::ios::beg);
 		std::vector<char> buffer64(64);
 		fPtr.read(buffer64.data(), 64);
-		std::string bufferStr(buffer64.data(), buffer64.size());
+		if (fPtr.gcount() < 64) {
+				qDebug() << "[!] Error: Failed to read version detection buffer, got" << fPtr.gcount() << "bytes";
+				throw std::runtime_error("Incomplete version buffer read");
+		}
 
-		if (bufferStr.find("python") != std::string::npos) {
+		std::string bufferStr(buffer64.data(), buffer64.size());
+		// Convert buffer to lowercase for case-insensitive comparison
+		std::string bufferLower = bufferStr;
+		std::transform(bufferLower.begin(), bufferLower.end(), bufferLower.begin(), ::tolower);
+
+		// Log the buffer for debugging
+		QByteArray byteArray(buffer64.data(), buffer64.size());
+		qDebug() << "[DEBUG] Version detection buffer (hex):" << byteArray.toHex();
+		qDebug() << "[DEBUG] Version detection buffer (string):" << QString::fromStdString(bufferStr);
+
+		if (bufferLower.find("python") != std::string::npos) {
 				qDebug() << "[+] Pyinstaller version: 2.1+";
 				pyinstVer = 21;
 		}
@@ -139,15 +153,38 @@ bool PyInstArchive::getCArchiveInfo() {
 
 void PyInstArchive::readArchiveData(uint32_t& lengthofPackage, uint32_t& toc, uint32_t& tocLen, uint32_t& pyver) {
 		fPtr.seekg(cookiePos, std::ios::beg);
-		char buffer[PYINST21_COOKIE_SIZE];  // Use a single buffer to handle both versions
-		fPtr.read(buffer, (pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE);
+		char buffer[PYINST21_COOKIE_SIZE];
+		size_t cookieSize = (pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE;
+		fPtr.read(buffer, cookieSize);
 
-		if (pyinstVer == 20 || pyinstVer == 21) {
-				lengthofPackage = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 8));
-				toc = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 12));
-				tocLen = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 16));
-				pyver = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 20));
+		if (fPtr.gcount() < static_cast<std::streamsize>(cookieSize)) {
+				qDebug() << "[!] Error: Failed to read cookie, expected" << cookieSize << "bytes, got" << fPtr.gcount();
+				throw std::runtime_error("Incomplete cookie read");
 		}
+
+		// Verify magic
+		if (std::memcmp(buffer, MAGIC.c_str(), MAGIC.size()) != 0) {
+				qDebug() << "[!] Error: Invalid magic in cookie";
+				throw std::runtime_error("Invalid PyInstaller archive");
+		}
+
+		// Parse common fields (magic, lengthofPackage, toc, tocLen, pyver)
+		lengthofPackage = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 8));
+		toc = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 12));
+		tocLen = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 16));
+		pyver = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 20));
+
+		// Log raw cookie for debugging
+		QByteArray byteArray(buffer, cookieSize);
+		qDebug() << "[DEBUG] Raw cookie (hex):" << byteArray.toHex();
+
+		// For newer PyInstaller versions, read additional fields if present
+		if (pyinstVer == 21 && cookieSize > 84) {
+				qDebug() << "[DEBUG] Detected potential newer PyInstaller version, ignoring extra cookie bytes";
+		}
+
+		qDebug() << "[DEBUG] Cookie data: lengthofPackage=" << lengthofPackage
+				<< ", toc=" << toc << ", tocLen=" << tocLen << ", pyver=" << pyver;
 }
 
 void PyInstArchive::calculateOverlayInfo(uint32_t lengthofPackage, uint32_t toc, uint32_t tocLen) {
@@ -156,6 +193,23 @@ void PyInstArchive::calculateOverlayInfo(uint32_t lengthofPackage, uint32_t toc,
 		overlayPos = fileSize - overlaySize;
 		tableOfContentsPos = overlayPos + toc;
 		tableOfContentsSize = tocLen;
+
+		uint64_t altTableOfContentsPos = cookiePos + ((pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE) + toc;
+		qDebug() << "[DEBUG] Standard tableOfContentsPos=" << tableOfContentsPos
+				<< ", Alternative tableOfContentsPos=" << altTableOfContentsPos;
+
+		if (tableOfContentsPos >= fileSize || tableOfContentsPos + tableOfContentsSize > fileSize) {
+				qDebug() << "[!] Error: Invalid tableOfContentsPos=" << tableOfContentsPos
+						<< ", fileSize=" << fileSize << ", tocLen=" << tableOfContentsSize;
+				qDebug() << "[DEBUG] Trying alternative tableOfContentsPos=" << altTableOfContentsPos;
+				tableOfContentsPos = altTableOfContentsPos;
+				if (tableOfContentsPos >= fileSize || tableOfContentsPos + tableOfContentsSize > fileSize) {
+						throw std::runtime_error("Table of Contents position out of bounds");
+				}
+		}
+
+		qDebug() << "[DEBUG] Overlay: size=" << overlaySize << ", pos=" << overlayPos;
+		qDebug() << "[DEBUG] TOC: pos=" << tableOfContentsPos << ", size=" << tableOfContentsSize;
 }
 
 void PyInstArchive::parseTOC() {
@@ -163,21 +217,37 @@ void PyInstArchive::parseTOC() {
 		tocList.clear();
 		uint32_t parsedLen = 0;
 
+		qDebug() << "[DEBUG] Parsing TOC at position" << tableOfContentsPos << ", size" << tableOfContentsSize;
+
 		while (parsedLen < tableOfContentsSize) {
 				uint32_t entrySize;
-				if (!readEntrySize(entrySize)) break;
+				if (!readEntrySize(entrySize)) {
+						qDebug() << "[!] Warning: Failed to read TOC entry size at parsedLen=" << parsedLen;
+						break;
+				}
 
-				std::vector<char> nameBuffer(entrySize - sizeofEntry());
-				uint32_t entryPos, cmprsdDataSize, uncmprsdDataSize;
-				uint8_t cmprsFlag;
-				char typeCmprsData;
+				try {
+						std::vector<char> nameBuffer(entrySize - sizeofEntry());
+						uint32_t entryPos, cmprsdDataSize, uncmprsdDataSize;
+						uint8_t cmprsFlag;
+						char typeCmprsData;
 
-				readEntryFields(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, nameBuffer, entrySize);
+						readEntryFields(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, nameBuffer, entrySize);
 
-				std::string name = decodeEntryName(nameBuffer, parsedLen);
-				addTOCEntry(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, name);
+						std::string name = decodeEntryName(nameBuffer, parsedLen);
+						addTOCEntry(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, name);
 
-				parsedLen += entrySize;
+						parsedLen += entrySize;
+				}
+				catch (const std::exception& e) {
+						qDebug() << "[!] Warning: Failed to parse TOC entry at parsedLen=" << parsedLen << ":" << e.what();
+						parsedLen += entrySize; 
+						continue;
+				}
+		}
+
+		if (parsedLen != tableOfContentsSize) {
+				qDebug() << "[!] Warning: Parsed" << parsedLen << "bytes, expected" << tableOfContentsSize;
 		}
 
 		qDebug() << "[+] Found " << tocList.size() << " files in CArchive";
@@ -185,34 +255,98 @@ void PyInstArchive::parseTOC() {
 
 bool PyInstArchive::readEntrySize(uint32_t& entrySize) {
 		fPtr.read(reinterpret_cast<char*>(&entrySize), sizeof(entrySize));
-		if (fPtr.gcount() < sizeof(entrySize)) return false;
+		if (fPtr.gcount() < static_cast<std::streamsize>(sizeof(entrySize))) {
+				qDebug() << "[!] Error: Failed to read TOC entry size, expected" << sizeof(entrySize)
+						<< "bytes, got" << fPtr.gcount();
+				return false;
+		}
 
 		entrySize = swapBytes(entrySize);
+		// Validate entrySize
+		if (entrySize < sizeofEntry() || entrySize > tableOfContentsSize) {
+				qDebug() << "[!] Error: Invalid TOC entry size=" << entrySize
+						<< ", expected at least" << sizeofEntry() << ", max" << tableOfContentsSize;
+				return false;
+		}
+
+		qDebug() << "[DEBUG] TOC entrySize=" << entrySize;
 		return true;
 }
 
-void PyInstArchive::readEntryFields(uint32_t& entryPos, uint32_t& cmprsdDataSize, uint32_t& uncmprsdDataSize, uint8_t& cmprsFlag, char& typeCmprsData, std::vector<char>& nameBuffer, uint32_t entrySize) {
+void PyInstArchive::readEntryFields(uint32_t& entryPos, uint32_t& cmprsdDataSize, uint32_t& uncmprsdDataSize,
+		uint8_t& cmprsFlag, char& typeCmprsData, std::vector<char>& nameBuffer,
+		uint32_t entrySize) {
+		// Log current file position
+		std::streampos currentPos = fPtr.tellg();
+		qDebug() << "[DEBUG] Reading TOC entry at file position=" << currentPos;
+
 		uint32_t nameLen = sizeofEntry();
-		fPtr.read(reinterpret_cast<char*>(&entryPos), sizeof(entryPos));
-		fPtr.read(reinterpret_cast<char*>(&cmprsdDataSize), sizeof(cmprsdDataSize));
-		fPtr.read(reinterpret_cast<char*>(&uncmprsdDataSize), sizeof(uncmprsdDataSize));
-		fPtr.read(reinterpret_cast<char*>(&cmprsFlag), sizeof(cmprsFlag));
-		fPtr.read(reinterpret_cast<char*>(&typeCmprsData), sizeof(typeCmprsData));
+		if (entrySize < nameLen) {
+				qDebug() << "[!] Error: TOC entry size too small:" << entrySize << ", expected at least" << nameLen;
+				throw std::runtime_error("Invalid TOC entry size");
+		}
 
-		entryPos = swapBytes(entryPos);
-		cmprsdDataSize = swapBytes(cmprsdDataSize);
-		uncmprsdDataSize = swapBytes(uncmprsdDataSize);
+		char buffer[14]; 
+		fPtr.read(buffer, sizeof(buffer));
+		size_t bytesRead = fPtr.gcount();
 
-		fPtr.read(nameBuffer.data(), entrySize - nameLen);
+		if (bytesRead < sizeof(buffer)) {
+				qDebug() << "[!] Error: Failed to read TOC entry fields, expected" << sizeof(buffer)
+						<< "bytes, got" << bytesRead << "at position" << currentPos;
+				throw std::runtime_error("Incomplete TOC entry read");
+		}
+
+		entryPos = swapBytes(*reinterpret_cast<uint32_t*>(buffer));
+		cmprsdDataSize = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 4));
+		uncmprsdDataSize = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 8));
+		cmprsFlag = *reinterpret_cast<uint8_t*>(buffer + 12);
+		typeCmprsData = *reinterpret_cast<char*>(buffer + 13);
+
+		size_t nameBufferSize = entrySize - nameLen;
+		nameBuffer.resize(nameBufferSize);
+		fPtr.read(nameBuffer.data(), nameBufferSize);
+
+		if (fPtr.gcount() < static_cast<std::streamsize>(nameBufferSize)) {
+				qDebug() << "[!] Error: Failed to read TOC entry name, expected" << nameBufferSize
+						<< "bytes, got" << fPtr.gcount() << "at position" << fPtr.tellg();
+				throw std::runtime_error("Incomplete TOC entry name read");
+		}
+
+		QByteArray byteArray(nameBuffer.data(), nameBufferSize);
+		qDebug() << "[DEBUG] TOC entry: entryPos=" << entryPos
+				<< ", cmprsdDataSize=" << cmprsdDataSize
+				<< ", uncmprsdDataSize=" << uncmprsdDataSize
+				<< ", cmprsFlag=" << cmprsFlag
+				<< ", typeCmprsData=" << typeCmprsData
+				<< ", nameBuffer (hex)=" << byteArray.toHex();
 }
 
+
 std::string PyInstArchive::decodeEntryName(std::vector<char>& nameBuffer, uint32_t parsedLen) {
-		std::string name(nameBuffer.data(), nameBuffer.size());
+		// Try to interpret the buffer as a UTF-8 string
+		QString qName = QString::fromUtf8(nameBuffer.data(), nameBuffer.size());
+		std::string name = qName.toStdString();
+
 		name.erase(std::remove(name.begin(), name.end(), '\0'), name.end());
 
-		if (name.empty() || name[0] == '/') {
-				name = "unnamed_" + std::to_string(parsedLen);
+		// Check if the name is valid
+		bool isValid = !name.empty() && name[0] != '/' && name[0] != '\\' &&
+				name.find_first_not_of(" \t\n\r") != std::string::npos;
+
+		// Additional check for non-printable or invalid characters
+		for (char c : name) {
+				if (c < 32 || c > 126) {
+						isValid = false;
+						break;
+				}
 		}
+
+		if (!isValid) {
+				name = "unnamed_" + QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString() + "_" + std::to_string(parsedLen);
+				qDebug() << "[!] Warning: Invalid or unreadable file name, using fallback:" << QString::fromStdString(name);
+		}
+
+		std::replace(name.begin(), name.end(), '..', '__');
 
 		return name;
 }
@@ -232,7 +366,12 @@ void PyInstArchive::addTOCEntry(uint32_t entryPos, uint32_t cmprsdDataSize, uint
 }
 
 uint32_t PyInstArchive::sizeofEntry() const {
-		return sizeof(uint32_t) + sizeof(uint32_t) * 3 + sizeof(uint8_t) + sizeof(char);
+		return sizeof(uint32_t) +
+				sizeof(uint32_t) +
+				sizeof(uint32_t) +
+				sizeof(uint32_t) +
+				sizeof(uint8_t) +
+				sizeof(char);
 }
 
 void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const std::string& outputDir, std::mutex& mtx, std::mutex& printMtx) {
@@ -298,11 +437,29 @@ void PyInstArchive::decompressAndExtractFile(const CTOCEntry& tocEntry, const st
 }
 
 void PyInstArchive::displayInfo(QListWidget* listWidget) {
-		if (!listWidget) return;
+		if (!listWidget) {
+				qDebug() << "[!] Error: QListWidget is null";
+				return;
+		}
+
+		// Set a fallback font to avoid font-related crashes
+		QFont fallbackFont("Arial", 10);
+		listWidget->setFont(fallbackFont);
+
 		listWidget->clear();
 		for (const auto& entry : tocList) {
-				QString itemText = QString::fromStdString(entry.getName());
-				listWidget->addItem(itemText);
+				try {
+						QString itemText = QString::fromStdString(entry.getName());
+						if (itemText.isEmpty()) {
+								itemText = "Unnamed_File";
+								qDebug() << "[!] Warning: Empty TOC entry name, using fallback name";
+						}
+						qDebug() << "[+] Adding TOC Entry:" << itemText;
+						listWidget->addItem(itemText);
+				}
+				catch (const std::exception& e) {
+						qDebug() << "[!] Error adding item to QListWidget:" << e.what();
+				}
 		}
 }
 
