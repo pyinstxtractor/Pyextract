@@ -169,15 +169,20 @@ void PyInstArchive::determinePyinstallerVersion() {
 		fPtr.seekg(cookiePos + PYINST20_COOKIE_SIZE, std::ios::beg);
 		std::vector<char> buffer64(64);
 		fPtr.read(buffer64.data(), 64);
-		std::string bufferStr(buffer64.data(), buffer64.size());
 
-		if (bufferStr.find("python") != std::string::npos) {
-				std::cout << "[+] Pyinstaller version: 2.1+" << std::endl;
-				pyinstVer = 21;
+		if (fPtr.gcount() < 64) {
+				throw std::runtime_error("Incomplete version buffer read");
+		}
+
+		std::string bufferStr(buffer64.data(), buffer64.size());
+		std::string bufferLower = bufferStr;
+		std::transform(bufferLower.begin(), bufferLower.end(), bufferLower.begin(), ::tolower);
+
+		if (bufferLower.find("python") != std::string::npos) {
+				pyinstVer = 21; // PyInstaller 2.1+
 		}
 		else {
-				std::cout << "[+] Pyinstaller version: 2.0" << std::endl;
-				pyinstVer = 20;
+				pyinstVer = 20; // PyInstaller 2.0
 		}
 }
 
@@ -295,15 +300,24 @@ bool PyInstArchive::getCArchiveInfo() {
  */
 void PyInstArchive::readArchiveData(uint32_t& lengthofPackage, uint32_t& toc, uint32_t& tocLen, uint32_t& pyver) {
 		fPtr.seekg(cookiePos, std::ios::beg);
-		char buffer[PYINST21_COOKIE_SIZE];  // Use a single buffer to handle both versions
-		fPtr.read(buffer, (pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE);
+		char buffer[PYINST21_COOKIE_SIZE];
+		size_t cookieSize = (pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE;
+		fPtr.read(buffer, cookieSize);
 
-		if (pyinstVer == 20 || pyinstVer == 21) {
-				lengthofPackage = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 8));
-				toc = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 12));
-				tocLen = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 16));
-				pyver = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 20));
+		if (fPtr.gcount() < static_cast<std::streamsize>(cookieSize)) {
+				throw std::runtime_error("Incomplete cookie read");
 		}
+
+		// Verify magic
+		if (std::memcmp(buffer, MAGIC.c_str(), MAGIC.size()) != 0) {
+				throw std::runtime_error("Invalid PyInstaller archive");
+		}
+
+		// Parse common fields (magic, lengthofPackage, toc, tocLen, pyver)
+		lengthofPackage = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 8));
+		toc = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 12));
+		tocLen = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 16));
+		pyver = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 20));
 }
 
 
@@ -323,6 +337,15 @@ void PyInstArchive::calculateOverlayInfo(uint32_t lengthofPackage, uint32_t toc,
 		overlayPos = fileSize - overlaySize;
 		tableOfContentsPos = overlayPos + toc;
 		tableOfContentsSize = tocLen;
+
+		uint64_t altTableOfContentsPos = cookiePos + ((pyinstVer == 20) ? PYINST20_COOKIE_SIZE : PYINST21_COOKIE_SIZE) + toc;
+
+		if (tableOfContentsPos >= fileSize || tableOfContentsPos + tableOfContentsSize > fileSize) {
+				tableOfContentsPos = altTableOfContentsPos;
+				if (tableOfContentsPos >= fileSize || tableOfContentsPos + tableOfContentsSize > fileSize) {
+						throw std::runtime_error("Table of Contents position out of bounds");
+				}
+		}
 }
 
 #ifdef _DEBUG
@@ -371,22 +394,28 @@ void PyInstArchive::parseTOC() {
 
 		while (parsedLen < tableOfContentsSize) {
 				uint32_t entrySize;
-				if (!readEntrySize(entrySize)) break;
+				if (!readEntrySize(entrySize)) {
+						break;
+				}
 
-				std::vector<char> nameBuffer(entrySize - sizeofEntry());
-				uint32_t entryPos, cmprsdDataSize, uncmprsdDataSize;
-				uint8_t cmprsFlag;
-				char typeCmprsData;
+				try {
+						std::vector<char> nameBuffer(entrySize - sizeofEntry());
+						uint32_t entryPos, cmprsdDataSize, uncmprsdDataSize;
+						uint8_t cmprsFlag;
+						char typeCmprsData;
 
-				readEntryFields(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, nameBuffer, entrySize);
+						readEntryFields(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, nameBuffer, entrySize);
 
-				std::string name = decodeEntryName(nameBuffer, parsedLen);
-				addTOCEntry(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, name);
+						std::string name = decodeEntryName(nameBuffer, parsedLen);
+						addTOCEntry(entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, name);
 
-				parsedLen += entrySize;
+						parsedLen += entrySize;
+				}
+				catch (const std::exception&) {
+						parsedLen += entrySize;
+						continue;
+				}
 		}
-
-		std::cout << "[+] Found " << tocList.size() << " files in CArchive" << std::endl;
 }
 
 /**
@@ -397,9 +426,14 @@ void PyInstArchive::parseTOC() {
  */
 bool PyInstArchive::readEntrySize(uint32_t& entrySize) {
 		fPtr.read(reinterpret_cast<char*>(&entrySize), sizeof(entrySize));
-		if (fPtr.gcount() < sizeof(entrySize)) return false;
-
+		if (fPtr.gcount() < static_cast<std::streamsize>(sizeof(entrySize))) {
+				return false;
+		}
 		entrySize = swapBytes(entrySize);
+		if (entrySize < sizeofEntry() || entrySize > tableOfContentsSize) {
+				return false;
+		}
+
 		return true;
 }
 
@@ -416,17 +450,31 @@ bool PyInstArchive::readEntrySize(uint32_t& entrySize) {
  */
 void PyInstArchive::readEntryFields(uint32_t& entryPos, uint32_t& cmprsdDataSize, uint32_t& uncmprsdDataSize, uint8_t& cmprsFlag, char& typeCmprsData, std::vector<char>& nameBuffer, uint32_t entrySize) {
 		uint32_t nameLen = sizeofEntry();
-		fPtr.read(reinterpret_cast<char*>(&entryPos), sizeof(entryPos));
-		fPtr.read(reinterpret_cast<char*>(&cmprsdDataSize), sizeof(cmprsdDataSize));
-		fPtr.read(reinterpret_cast<char*>(&uncmprsdDataSize), sizeof(uncmprsdDataSize));
-		fPtr.read(reinterpret_cast<char*>(&cmprsFlag), sizeof(cmprsFlag));
-		fPtr.read(reinterpret_cast<char*>(&typeCmprsData), sizeof(typeCmprsData));
+		if (entrySize < nameLen) {
+				throw std::runtime_error("Invalid TOC entry size");
+		}
 
-		entryPos = swapBytes(entryPos);
-		cmprsdDataSize = swapBytes(cmprsdDataSize);
-		uncmprsdDataSize = swapBytes(uncmprsdDataSize);
+		char buffer[14];
+		fPtr.read(buffer, sizeof(buffer));
+		size_t bytesRead = fPtr.gcount();
 
-		fPtr.read(nameBuffer.data(), entrySize - nameLen);
+		if (bytesRead < sizeof(buffer)) {
+				throw std::runtime_error("Incomplete TOC entry read");
+		}
+
+		entryPos = swapBytes(*reinterpret_cast<uint32_t*>(buffer));
+		cmprsdDataSize = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 4));
+		uncmprsdDataSize = swapBytes(*reinterpret_cast<uint32_t*>(buffer + 8));
+		cmprsFlag = *reinterpret_cast<uint8_t*>(buffer + 12);
+		typeCmprsData = *reinterpret_cast<char*>(buffer + 13);
+
+		size_t nameBufferSize = entrySize - nameLen;
+		nameBuffer.resize(nameBufferSize);
+		fPtr.read(nameBuffer.data(), nameBufferSize);
+
+		if (fPtr.gcount() < static_cast<std::streamsize>(nameBufferSize)) {
+				throw std::runtime_error("Incomplete TOC entry name read");
+		}
 }
 
 /**
@@ -439,10 +487,20 @@ void PyInstArchive::readEntryFields(uint32_t& entryPos, uint32_t& cmprsdDataSize
 std::string PyInstArchive::decodeEntryName(std::vector<char>& nameBuffer, uint32_t parsedLen) {
 		std::string name(nameBuffer.data(), nameBuffer.size());
 		name.erase(std::remove(name.begin(), name.end(), '\0'), name.end());
-
-		if (name.empty() || name[0] == '/') {
-				name = "unnamed_" + std::to_string(parsedLen);
+		bool isValid = !name.empty() && name[0] != '/' && name[0] != '\\' &&
+				name.find_first_not_of(" \t\n\r") != std::string::npos;
+		for (char c : name) {
+				if (c < 32 || c > 126) {
+						isValid = false;
+						break;
+				}
 		}
+		static uint32_t counter = 0;
+		if (!isValid) {
+				name = "unnamed_" + std::to_string(parsedLen) + "_" + std::to_string(counter++);
+		}
+
+		std::replace(name.begin(), name.end(), '.', '_');
 
 		return name;
 }
@@ -477,9 +535,13 @@ void PyInstArchive::addTOCEntry(uint32_t entryPos, uint32_t cmprsdDataSize, uint
  * @return The size of the standard TOC entry fields.
  */
 uint32_t PyInstArchive::sizeofEntry() const {
-		return sizeof(uint32_t) + sizeof(uint32_t) * 3 + sizeof(uint8_t) + sizeof(char);
+		return sizeof(uint32_t) +
+				sizeof(uint32_t) +
+				sizeof(uint32_t) +
+				sizeof(uint32_t) +
+				sizeof(uint8_t) +
+				sizeof(char);
 }
-
 /**
  * @brief Displays the list of files in the PyInstaller archive.
  *
@@ -488,10 +550,17 @@ uint32_t PyInstArchive::sizeofEntry() const {
  */
 void PyInstArchive::displayInfo() {
 		std::cout << "[+] Archive Info:" << std::endl;
-		// Print out relevant information about the PyInstaller archive
-		// For example: number of files, archive version, etc.
 		for (const auto& entry : tocList) {
-				std::cout << "File: " << entry.getName() << ", Size: " << entry.getCompressedDataSize() << " bytes" << std::endl;
+				try {
+						std::string name = entry.getName();
+						if (name.empty()) {
+								name = "Unnamed_File";
+						}
+						std::cout << "File: " << name << ", Size: " << entry.getCompressedDataSize() << " bytes" << std::endl;
+				}
+				catch (const std::exception&) {
+						// Silently skip invalid entries
+				}
 		}
 }
 
